@@ -26,7 +26,7 @@ if [[ -n "$(git diff --name-only)" || -n "$(git diff --cached --name-only)" ]]; 
   fail "Tracked files have local changes. Review or commit them before updating."
 fi
 
-UNTRACKED_FILES="$(git ls-files --others --exclude-standard | grep -vx 'package-lock.json' || true)"
+UNTRACKED_FILES="$(git ls-files --others --exclude-standard | grep -Ev '^(package-lock\.json|\.npm(/.*)?)$' || true)"
 if [[ -n "$UNTRACKED_FILES" ]]; then
   fail "Unexpected untracked files exist. Review them before updating: $UNTRACKED_FILES"
 fi
@@ -57,6 +57,10 @@ fi
 
 log "Building the Next.js production site"
 NEXT_PUBLIC_API_URL=/ npm run build
+
+# Next.js may add a generated reference to .next/types in this tracked helper file.
+# The built application does not need that generated edit at runtime.
+git restore --worktree -- next-env.d.ts
 
 log "Restarting application services"
 systemctl restart mna-api.service mna-web.service
