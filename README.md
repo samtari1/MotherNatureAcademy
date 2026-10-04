@@ -1,73 +1,86 @@
 # Mother Nature Academy website
 
-A Next.js site with a FastAPI inquiry service and PostgreSQL storage, packaged for a VPS with Docker Compose and Caddy.
+Next.js, FastAPI, and PostgreSQL website, deployed with Docker Compose behind Apache.
 
-## Local preview
+## Deploy on a VPS
 
-Requirements: Node.js 20+, Python 3.12+ (or Docker Compose).
+Apache stays on ports 80 and 443. The Compose stack exposes Next.js on `127.0.0.1:3000`, FastAPI on `127.0.0.1:8000`, and keeps PostgreSQL private in Docker. Apache proxies `/api/` and `/health` to FastAPI, then all other requests to Next.js using `deploy/apache-mothernatureacademy.conf`.
 
-```sh
-npm install
-npm run dev
-```
+### Clone and prepare
 
-Run the API separately:
+SSH to the server, install Git, Docker Engine and the Docker Compose plugin for its Linux distribution, then:
 
 ```sh
-cd backend
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
-uvicorn app.main:app --reload
+sudo mkdir -p /opt/mothernatureacademy
+sudo chown "$USER":"$USER" /opt/mothernatureacademy
+git clone https://github.com/samtari1/MotherNatureAcademy.git /opt/mothernatureacademy
+cd /opt/mothernatureacademy
 ```
 
-The API needs a PostgreSQL database. For a quick local stack, configure both environment files and use Docker Compose as described below. `NEXT_PUBLIC_API_URL` should point to the API (for example `http://localhost:8000` in local development, `/`-relative API routing via a same-origin proxy in production).
+For a private repo, set up SSH authentication on the VPS. Do not put a GitHub token in the URL.
 
-## VPS deployment
+Create the private root environment file:
 
-1. Install Docker Engine and the Docker Compose plugin on the VPS.
-2. Copy this repository to the VPS and create a root `.env` based on `.env.example`. Set a long unique `POSTGRES_PASSWORD`, `SITE_DOMAIN`, and the public API base path.
-3. Copy `backend/.env.example` to `backend/.env`. Set `DATABASE_URL=postgresql+psycopg://mna_user:YOUR_PASSWORD@db:5432/mna`, the allowed web origin, notification recipient, and SMTP details. Do not commit either env file.
-4. The default `NEXT_PUBLIC_API_URL=/` uses the same-origin `/api/inquiries` route. The Caddy proxy routes `/api/*` to FastAPI and the other paths to Next.js. Rebuild the frontend if changing this public build argument.
-5. Set `SITE_DOMAIN=mothernatureacademy.com` and run `docker compose up -d --build`.
-6. Configure the firewall to allow inbound TCP 80 and 443, and test HTTPS, the inquiry flow, mail delivery, backups, and restore before switching production DNS.
+```sh
+printf 'POSTGRES_PASSWORD=%s\nNEXT_PUBLIC_API_URL=/\n' "$(openssl rand -hex 32)" > .env
+chmod 600 .env
+```
 
-Caddy obtains and renews TLS automatically once the domain resolves to the VPS and ports 80/443 are reachable. To preview, use a separate subdomain such as `new.mothernatureacademy.com`; keep the GoDaddy `@` and `www` records unchanged until the replacement is approved.
+Create the backend environment file:
 
-### GoDaddy DNS and mail
+```sh
+cp backend/.env.example backend/.env
+chmod 600 backend/.env
+```
 
-At launch, change only the web routing records: point the apex `@` A record to the VPS address, then update `www` to resolve to the apex (or point it to the VPS). Preserve MX, SPF, DKIM, DMARC, and mail-related records exactly as required by the current email provider. Existing screenshots showed a `new` host record directed to a different IP, but did not show the MX or TXT records; verify the full live zone before any DNS edits. Keeping the old shared-hosting plan does not itself change DNS or mailbox service.
+Edit `backend/.env` with a secure editor. Set `DATABASE_URL` to `postgresql+psycopg://mna_user:YOUR_SAME_POSTGRES_PASSWORD@db:5432/mna`, set `ALLOWED_ORIGINS` to the production HTTPS origins, and enter the SMTP host, user, password, and authorized sender issued by the email provider. Never commit these secret files.
 
-### Email configuration
+### Build and start containers
 
-Use the current email service's authenticated SMTP settings or a transactional email provider. Set `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, and `SMTP_FROM` in `backend/.env`. `SMTP_FROM` must be an address authorized by that provider; do not assume a mailbox password or relay host will work as an SMTP sender. The API stores the inquiry first and records successful notification delivery. If email fails or is not configured, the form submission is still stored in PostgreSQL, but this starter has no admin dashboard or automatic retry queue. Add monitoring and a secure inbox/CRM workflow before relying on it for live enrollment.
+```sh
+docker compose up -d --build
+docker compose ps
+curl -fsS http://127.0.0.1:3000/ >/dev/null
+curl -fsS http://127.0.0.1:8000/health
+```
 
-## Information to confirm before production
+The containers bind only to loopback. Do not open port 5432 to the Internet.
 
-- Current tuition and annual registration fee. Values on the hours page reflect public search-indexed content and may be out of date.
-- Current calendar and enrollment availability.
-- Correct public contact details, mailing address, and approved use of names/photos.
-- The inquiry form fields, privacy/retention policy, and preferred notification recipient.
-- Whether full enrollment documents, health details, payments, or agreements belong in a later secure enrollment process. Do not collect sensitive child information in this public inquiry form.
+### Configure Apache and HTTPS
 
-## Important production work
+Enable `proxy`, `proxy_http`, `proxy_wstunnel`, `rewrite`, `headers`, and `ssl` modules using the commands for your distribution. Obtain a TLS certificate for the site with your existing certificate manager. Copy `deploy/apache-mothernatureacademy.conf` into the Apache virtual-host directory, verify certificate paths, enable the site, run `apachectl configtest`, and reload Apache. The supplied example redirects HTTP to HTTPS and sends `/api/` and `/health` to FastAPI, other paths to Next.js.
 
-- Replace `Base.metadata.create_all` with Alembic migrations as the schema evolves.
-- Add a proper shared rate limiter (for example at Caddy or with Redis), bot filtering, and monitoring.
-- Back up PostgreSQL off-server on a schedule, restrict access to the backup, and rehearse a restore.
-- Restrict database/network access, keep system and container images patched, and rotate secrets if exposed.
-- Add a password-protected admin interface or another secure workflow to review stored inquiries. Database submissions contain parent and child-related information and should be treated as private.
-- Use current, academy-owned campus and classroom imagery. The initial design currently uses temporary stock photos from Unsplash; replace them with approved images before public launch.
+Allow inbound TCP ports 80 and 443 through the VPS firewall. Verify the site, API health, and form over HTTPS. Submitting a test inquiry creates a real database record and may send an email.
 
-## Existing page mapping
+### Preview and GoDaddy DNS
 
-- `/` — home
-- `/program` — existing outdoor preschool program page
-- `/curriculum` — curriculum and learning areas
-- `/campus` — campus and outdoor activity spaces
-- `/hours` — hours, tuition, registration fee, calendar note
-- `/contact` — contact information
-- `/register` — new inquiry form
+To preview, configure an Apache virtual host and certificate for `new.mothernatureacademy.com` and point only that subdomain's A record to the VPS. Keep the existing `@` and `www` website records on GoDaddy until launch. For cutover, point `@` to the VPS and `www` to the root domain or VPS. Preserve MX, SPF, DKIM, DMARC, and all other mail records so GoDaddy email continues working.
 
-Legacy `.html` URLs should redirect to the corresponding new paths at launch (for example `preschoolprogram.html` → `/program`, `hours.html` → `/hours`, `contact.html` → `/contact`). Add the full redirect list after confirming all live site paths and any search traffic.
+### Pull new code and redeploy
+
+After changes are pushed to GitHub, SSH to the VPS and run:
+
+```sh
+cd /opt/mothernatureacademy
+git pull --ff-only origin main
+docker compose up -d --build
+docker compose ps
+```
+
+Replace `main` if the repository uses another default branch. View logs with `docker compose logs --tail=100 web api`. PostgreSQL persists in a named volume; do not use `docker compose down -v` during routine updates because it deletes that volume.
+
+## Email and inquiry handling
+
+The backend stores each inquiry before attempting email notification. Configure authenticated SMTP using provider-authorized values in `backend/.env`. If delivery fails, the inquiry remains in PostgreSQL. This starter has no admin dashboard or automatic mail retry, so set up a secure review workflow before using the form for live enrollment.
+
+## Before public launch
+
+- Confirm current tuition, fee, calendar, enrollment availability, and contact details.
+- Replace temporary Unsplash stock photos with academy-approved images.
+- Confirm form fields, recipient, privacy and retention policy. Do not collect sensitive child health or personal data through the public inquiry form.
+- Set up IP-aware rate limiting, monitoring, off-server database backups, and a tested restore.
+- Keep operating system and container images updated; protect and rotate secrets.
+
+## Pages
+
+`/`, `/program`, `/curriculum`, `/campus`, `/hours`, `/contact`, and `/register`. Legacy `.html` paths redirect to the corresponding new routes.
