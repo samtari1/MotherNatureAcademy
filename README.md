@@ -2,6 +2,12 @@
 
 Next.js, FastAPI, and PostgreSQL website, deployed with Docker Compose behind Apache.
 
+## Run locally on macOS without Docker
+
+Run `./setup.sh` once from the project directory. It installs the Node and Python packages, prepares a local PostgreSQL database, and writes its credentials to the ignored `backend/.env` file. If PostgreSQL is missing and Homebrew is available, the script asks before installing PostgreSQL 16. It leaves SMTP disabled, so local form submissions are saved locally and do not send email.
+
+Then run `./start.sh`. Open `http://localhost:3000` to use the website. The API health endpoint is `http://localhost:8000/health`; press Ctrl+C in the script's terminal to stop both services. Setup and start scripts are for macOS development only and do not update the VPS.
+
 ## Deploy on a VPS
 
 Apache stays on ports 80 and 443. The Compose stack exposes Next.js on `127.0.0.1:3000`, FastAPI on `127.0.0.1:8000`, and keeps PostgreSQL private in Docker. Apache proxies `/api/` and `/health` to FastAPI, then all other requests to Next.js using `deploy/apache-mothernatureacademy.conf`.

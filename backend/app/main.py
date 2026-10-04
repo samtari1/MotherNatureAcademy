@@ -61,6 +61,7 @@ class Registration(Base):
     school_year: Mapped[str] = mapped_column(String(12), nullable=False)
     child_name: Mapped[str] = mapped_column(String(120), nullable=False)
     child_nickname: Mapped[str | None] = mapped_column(String(80))
+    child_age: Mapped[str] = mapped_column(String(40), nullable=False)
     child_date_of_birth: Mapped[date] = mapped_column(Date, nullable=False)
     lives_with: Mapped[str] = mapped_column(String(40), nullable=False)
     schedule: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -129,6 +130,7 @@ class RegistrationCreate(BaseModel):
     school_year: Literal["2026-27"]
     child_name: str = Field(min_length=1, max_length=120)
     child_nickname: str | None = Field(default=None, max_length=80)
+    child_age: Literal["2.5", "3", "4", "5", "Other / not yet born"]
     child_date_of_birth: date
     lives_with: Literal["Mother", "Father", "Both parents", "Other"]
     schedule: Literal["2_days", "3_days", "5_days"]
@@ -168,6 +170,11 @@ class RegistrationCreate(BaseModel):
     @classmethod
     def normalize_state(cls, value):
         return value.strip().upper() if isinstance(value, str) else value
+
+    @field_validator("second_guardian_email", mode="before")
+    @classmethod
+    def empty_second_email_is_missing(cls, value):
+        return None if value == "" else value
 
 
 def notify_academy(inquiry: Inquiry) -> bool:
@@ -227,6 +234,7 @@ def notify_registration(registration: Registration) -> bool:
         f"School year: {registration.school_year}\n"
         f"Child: {registration.child_name}\n"
         f"Nickname: {registration.child_nickname or 'Not provided'}\n"
+        f"Age: {registration.child_age}\n"
         f"Date of birth: {registration.child_date_of_birth.isoformat()}\n"
         f"Lives with: {registration.lives_with}\n"
         f"Schedule: {schedules[registration.schedule]}\n\n"
