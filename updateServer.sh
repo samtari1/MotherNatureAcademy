@@ -45,6 +45,9 @@ else
   fail "Local branch cannot be fast-forwarded to origin/$BRANCH. Resolve the branch history manually."
 fi
 
+log "Normalizing permissions on tracked application files"
+git ls-files -z | xargs -0r chmod u=rwX,go=rX
+
 log "Installing Python dependencies"
 backend/.venv/bin/pip install -r backend/requirements.txt
 
