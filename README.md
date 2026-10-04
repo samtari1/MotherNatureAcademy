@@ -83,7 +83,11 @@ The backend stores each inquiry before attempting email notification. Configure 
 
 ## Website admin
 
-Open `/admin` and sign in with the username and password configured for the admin account. The admin page can publish/edit/delete News posts, upload and hide/delete campus photos, add/hide/delete YouTube videos, and update the school year, hours, campus location, tuition, and registration fee. Public pages read these values from the API. Uploaded media is saved in the ignored `media/` directory, so keep that directory in server backups.
+Open `/admin` and sign in with the username and password configured for the admin account. The admin page can publish/edit/delete News posts and policy sections, upload and hide/delete campus photos, add/hide/delete YouTube videos, and update the school year, hours, campus location, tuition, and registration fee. Public pages read these values from the API. Uploaded media is saved in the ignored `media/` directory, so keep that directory in server backups.
+
+The `/policies` page presents family-facing summaries seeded from the legacy handbook. Edit or unpublish sections in Admin → Policies; families can use Print / Save as PDF to produce a current copy. The old PDF is not copied to the public site because it contains superseded tuition and staff contact details.
+
+Academic calendars are managed from Admin → Calendar. Each school year can have its own dates, notes, publication status, and current-year setting. Keep past years published to make them available in the archive selector on `/calendar`. The initial data is seeded from the calendar documents in `legacyWebsite` and persists in PostgreSQL; later edits are stored in the database.
 
 On a local macOS environment, `./setup.sh` prompts once for an admin username and password, stores a password hash and session secret in the ignored `backend/.env`, and keeps SMTP disabled. Use `./start.sh` and visit `http://localhost:3000/admin`.
 
@@ -106,4 +110,4 @@ Keep `/admin` restricted to trusted administrators. Set `ADMIN_COOKIE_SECURE=tru
 
 ## Pages
 
-`/`, `/program`, `/curriculum`, `/campus`, `/hours`, `/news`, `/contact`, `/register`, and `/admin`. Legacy `.html` paths redirect to the corresponding new routes.
+`/`, `/program`, `/curriculum`, `/campus`, `/hours`, `/calendar`, `/policies`, `/news`, `/contact`, `/register`, and `/admin`. Legacy `.html` paths redirect to the corresponding new routes.

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { PageIntro } from "@/components/page-intro";
 import { CampusMedia } from "@/components/campus-media";
+import { CampusMap } from "@/components/campus-map";
 import { Cherry, Boxes, CookingPot, Bird, Blocks, Theater, Sun, Waves, Music, Route, Egg } from "lucide-react";
 
 export const metadata: Metadata = { title: "Our Outdoor Campus" };
@@ -32,6 +33,7 @@ export default function CampusPage() {
         <Link className="button" href="/contact">Arrange a visit <span>↗</span></Link>
       </div>
     </div></section>
+    <CampusMap />
     <CampusMedia />
     <section className="campus-list"><div className="container">
       <div className="section-label"><span>02</span><span className="label-line"/> LITTLE PLACES, BIG IDEAS</div>

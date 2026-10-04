@@ -16,7 +16,7 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Respon
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from sqlalchemy import Date, DateTime, Integer, String, Text, create_engine, select
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Text, create_engine, select, update
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 from starlette.staticfiles import StaticFiles
 
@@ -110,6 +110,18 @@ class NewsPost(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
 
 
+class PolicySection(Base):
+    __tablename__ = "policy_sections"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    slug: Mapped[str] = mapped_column(String(200), nullable=False, unique=True, index=True)
+    title: Mapped[str] = mapped_column(String(180), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    published: Mapped[bool] = mapped_column(default=True, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
+
+
 class MediaItem(Base):
     __tablename__ = "media_items"
 
@@ -136,6 +148,30 @@ class SiteConfiguration(Base):
     registration_fee: Mapped[str] = mapped_column(String(40), nullable=False)
     school_year: Mapped[str] = mapped_column(String(40), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
+
+
+class AcademicCalendar(Base):
+    __tablename__ = "academic_calendars"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    school_year: Mapped[str] = mapped_column(String(40), nullable=False, unique=True)
+    title: Mapped[str] = mapped_column(String(180), nullable=False)
+    notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    is_current: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    published: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+
+class CalendarEvent(Base):
+    __tablename__ = "calendar_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    calendar_id: Mapped[int] = mapped_column(ForeignKey("academic_calendars.id", ondelete="CASCADE"), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(180), nullable=False)
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date | None] = mapped_column(Date)
+    description: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
 @asynccontextmanager
@@ -185,6 +221,89 @@ def seed_content() -> None:
                 ("video", "Virtual campus tour", "Take a look around campus", "", "https://www.youtube.com/embed/LZVVfnhUSSg", 10),
             ]
             db.add_all([MediaItem(kind=k, title=t, caption=c, alt_text=a, url=u, sort_order=o) for k, t, c, a, u, o in seed_items])
+        # The former PicturePage.html gallery held many additional academy
+        # photos that weren't represented in the first modern gallery. Seed
+        # each by stable URL so this also adds them to databases that already
+        # contain the original starter gallery.
+        legacy_gallery = [
+            ("Bunny", "A visit with one of the academy rabbits.", "A rabbit inside its enclosure.", "bunny-pics.jpg"),
+            ("Chicken coop", "A look at the academy chickens and coop.", "Chicken coop and outdoor run at the academy.", "chicken-pic.jpg"),
+            ("Nature trail", "A winding trail through the trees.", "A sandy path winding through a wooded area.", "pic1.jpg"),
+            ("Nature trail", "Exploring the wooded paths on campus.", "A sandy trail through the woods.", "pic2.jpg"),
+            ("Nature trail", "A shaded path invites a slow walk and a closer look.", "A path winding through the trees.", "pic4.jpg"),
+            ("Nature trail", "A quiet trail through the woods.", "A sandy woodland trail bordered by trees.", "pic5.jpg"),
+            ("Open lawn", "Room to run, play, and explore outside.", "A grassy open area on the academy grounds.", "pic7.jpg"),
+            ("Green chair", "A playful place to sit and imagine.", "Large green chair beneath the covered outdoor area.", "greenchair.jpg"),
+            ("Garden cart", "Tools and materials for hands-on outdoor work.", "Green garden cart on the academy grounds.", "greenmachine.jpg"),
+            ("Indoor classroom", "A peek inside one of the learning spaces.", "Tables and learning materials in a bright classroom.", "20161012-094050.jpg"),
+            ("Reading nook", "A cozy place to pause with a book.", "Bookshelves, floor cushions, and books in a reading nook.", "library2.jpg"),
+            ("Outdoor pavilion", "A covered place to gather and play outside.", "Covered outdoor pavilion with a mulch play area.", "lavapit.jpg"),
+            ("Outdoor classroom", "A covered space for making and learning outdoors.", "Covered outdoor classroom with tables and a garden bed.", "20170601-105402.jpg"),
+            ("Learning garden", "A small garden bed ready for planting and discovery.", "Raised garden bed beside the academy building.", "20170601-105619.jpg"),
+            ("Outdoor classroom", "A shaded space to gather and learn outside.", "Covered outdoor classroom and paved area.", "20170601-105628.jpg"),
+            ("Campus play space", "Outdoor play space beneath the trees.", "Academy outdoor play area beside a yellow building.", "20170601-105644.jpg"),
+            ("Garden", "Growing things together in the garden.", "Green plants growing in a sunny garden bed.", "20170601-110048.jpg"),
+            ("Classroom materials", "Materials are ready for sorting, creating, and play.", "Shelves and baskets of classroom learning materials.", "20170601-110327.jpg"),
+            ("Classroom tables", "A classroom corner set up for creative work.", "Small tables and shelves in the academy classroom.", "20170601-110404.jpg"),
+            ("Classroom art area", "A space for art, maps, and small-group activities.", "Child-sized tables, chairs, shelves, and a colorful map.", "20170601-110427.jpg"),
+            ("Outdoor toys", "Ride-on toys and play materials are ready outside.", "Child-sized ride-on toys stored beneath a covered play area.", "20170601-110819.jpg"),
+            ("Planting bed", "A garden bed ready for planting and care.", "A small raised planting bed along the building.", "20170601-110920.jpg"),
+            ("Garden", "A young garden growing on the academy grounds.", "Rows of small plants growing in a garden bed.", "20170601-111036.jpg"),
+        ]
+        for index, (title, caption, alt_text, filename) in enumerate(legacy_gallery):
+            url = f"/images/legacy-gallery/{filename}"
+            if db.scalar(select(MediaItem.id).where(MediaItem.url == url)) is None:
+                db.add(MediaItem(kind="photo", title=title, caption=caption, alt_text=alt_text, url=url, sort_order=70 + index * 10))
+        legacy_videos = [
+            ("Nature Kindergarten — Frances Krusekopf", "A short film about nature kindergarten and outdoor early learning.", "https://www.youtube.com/embed/MOngsiy67YY", 100),
+            ("The Cridge Nature Preschool — Shaw TV Victoria", "A look at the Cridge nature preschool program.", "https://www.youtube.com/embed/VYThQPwwXuc", 110),
+        ]
+        for title, caption, url, sort_order in legacy_videos:
+            if db.scalar(select(MediaItem.id).where(MediaItem.url == url)) is None:
+                db.add(MediaItem(kind="video", title=title, caption=caption, alt_text="", url=url, sort_order=sort_order))
+        if db.scalar(select(PolicySection.id).limit(1)) is None:
+            sections = [
+                ("outdoor-learning-and-safety", "Outdoor learning & safety", "Outdoor play and exploration are central to the academy day. Educators supervise activities and help children learn to notice and navigate age-appropriate risks. Campus activities and outdoor time may change with weather or site conditions; the academy communicates closures and schedule changes through its current family channels."),
+                ("enrollment", "Enrollment & availability", "Families may submit an application or inquiry through the website. Applications are reviewed by the academy, and submitting a form does not guarantee a place. Age eligibility, schedules, fees, and availability can change by school year; please confirm the current details with the academy before making enrollment plans."),
+                ("clothing-and-belongings", "Clothing & belongings", "Please dress children for the day’s weather in comfortable, washable layers suitable for outdoor play. Label clothing and any requested outdoor gear. Ask the academy what spare clothing or weather gear to keep on campus. Please leave toys and valuables at home unless you have arranged a comfort item with the educators."),
+                ("snacks-and-allergies", "Snacks & food allergies", "The academy’s handbook describes snacks being provided during the morning. Families should speak directly with the educators about allergies, dietary needs, or other food concerns before a child attends, so the academy can confirm the current plan. Please do not include sensitive medical details in the public inquiry or registration forms."),
+                ("health-and-medications", "Health, illness & medication", "Please keep a child home when they are unwell or unable to participate comfortably. Contact the academy directly for its current illness, return-to-school, emergency, and medication procedures. Share health needs and emergency plans directly with the educators through the academy’s enrollment process rather than through the public website forms."),
+                ("toileting-and-personal-care", "Toileting & personal care", "Children’s toileting and personal-care needs vary. Please discuss your child’s needs and the support they may require with the educators before the first day, so the academy can explain its current practices and agree on a plan with your family."),
+                ("arrival-and-pickup", "Arrival, departure & authorized pickup", "The academy may assign arrival and pickup times to help the day run smoothly. Please confirm your family’s current assigned times and pickup authorization requirements with the educators, and contact the academy if plans change or you expect to be delayed."),
+                ("family-participation", "Family participation & visitors", "Families are welcome to ask about classroom visits, enrichment, volunteering, or mentorship opportunities. All visits and volunteer participation must be arranged with the academy in advance and follow its current supervision, safety, and screening requirements."),
+                ("positive-guidance", "Positive guidance", "The academy’s handbook describes a positive-guidance approach that helps children build self-regulation, communication, and problem-solving skills. Educators guide children toward safe, respectful ways to resolve challenges and work with families when a child needs support."),
+            ]
+            db.add_all([PolicySection(slug=slug, title=title, body=body, sort_order=(index + 1) * 10) for index, (slug, title, body) in enumerate(sections)])
+        # Seed current and historical school calendars transcribed from the
+        # academy's legacy calendar documents. Older years remain published
+        # for reference; only 2026–2027 is selected as the current calendar.
+        calendar_seed = [
+            ("2017–2018", False, [
+                ("First day of programming", "2017-09-05", None, ""), ("Columbus Day Break (Closed)", "2017-10-09", "2017-10-10", ""), ("Veterans Day Holiday (Closed)", "2017-11-10", None, ""), ("Thanksgiving Break (Closed)", "2017-11-22", "2017-11-24", ""), ("Winter Break (Closed)", "2017-12-22", "2018-01-06", ""), ("Program Resumes", "2018-01-08", None, ""), ("Martin Luther King Day (Closed)", "2018-01-15", None, ""), ("President’s Day (Closed)", "2018-02-19", None, ""), ("Spring Break (Closed)", "2018-03-05", "2018-03-09", ""), ("Easter Holiday (Closed)", "2018-03-30", "2018-04-02", ""), ("Last Day of programming", "2018-05-25", None, ""), ("Summer Break (Closed)", "2018-05-28", "2018-09-03", ""),
+            ]),
+            ("2018–2019", False, [
+                ("First day of programming", "2018-09-04", None, ""), ("Fall Break (Closed)", "2018-10-19", "2018-10-22", ""), ("Veterans Day Holiday (Open)", "2018-11-12", None, ""), ("Thanksgiving Break (Closed)", "2018-11-21", "2018-11-23", ""), ("Winter Break (Closed)", "2018-12-21", "2019-01-04", ""), ("Program Resumes", "2019-01-07", None, ""), ("Martin Luther King Day (Closed)", "2019-01-21", None, ""), ("President’s Day (Closed)", "2019-02-18", None, ""), ("Spring Break (Closed)", "2019-03-04", "2019-03-08", ""), ("Easter Holiday (Closed)", "2019-04-18", "2019-04-19", ""), ("Last Day of programming", "2019-05-24", None, ""), ("Summer Break (Closed)", "2019-05-28", "2019-09-02", ""),
+            ]),
+            ("2020–2021", False, [
+                ("First day of programming", "2020-09-08", None, ""), ("Fall Break (Closed)", "2020-10-12", "2020-10-13", ""), ("Thanksgiving Break (Closed)", "2020-11-25", "2020-11-27", ""), ("Winter Break (Closed)", "2020-12-21", "2021-01-05", ""), ("Program Resumes", "2021-01-06", None, ""), ("Martin Luther King Day (Closed)", "2021-01-18", None, ""), ("President’s Day Holiday (Closed)", "2021-02-15", "2021-02-16", ""), ("Spring Break (Closed)", "2021-04-05", "2021-04-09", ""), ("Last Day of programming", "2021-05-21", None, ""), ("Summer Break (Closed)", "2021-05-24", "2021-09-06", ""),
+            ]),
+            ("2023–2024", False, [
+                ("First day of programming", "2023-09-05", None, ""), ("Fall Break (Closed)", "2023-10-09", "2023-10-10", ""), ("Thanksgiving Break (Closed)", "2023-11-22", "2023-11-24", ""), ("Winter Break (Closed)", "2023-12-18", "2024-01-02", ""), ("Program Resumes", "2024-01-10", None, ""), ("Martin Luther King Day (Closed)", "2024-01-15", None, ""), ("President’s Day Holiday (Closed)", "2024-02-19", "2024-02-20", ""), ("Spring Break (Closed)", "2024-03-11", "2024-03-15", ""), ("Easter Holiday", "2024-04-01", "2024-04-02", ""), ("Last Day of programming", "2024-05-17", None, ""), ("Summer Break (Closed)", "2024-05-20", "2024-09-03", ""),
+            ]),
+            ("2024–2025", False, [
+                ("First day of programming", "2024-09-03", None, ""), ("Fall Break (Closed)", "2024-10-14", "2024-10-15", ""), ("Thanksgiving Break (Closed)", "2024-11-27", "2024-11-29", ""), ("Winter Break (Closed)", "2024-12-23", "2025-01-07", ""), ("Program Resumes", "2025-01-08", None, ""), ("Martin Luther King Day (Closed)", "2025-01-20", None, ""), ("President’s Day Holiday (Closed)", "2025-02-17", "2025-02-18", ""), ("Spring Break (Closed)", "2025-03-24", "2025-03-28", ""), ("Program Resumes", "2025-03-31", None, ""), ("Holiday Break (Closed)", "2025-04-18", "2025-04-21", ""), ("Last Day of programming", "2025-05-16", None, ""), ("Summer Break (Closed)", "2025-05-19", "2025-09-02", ""),
+            ]),
+            ("2026–2027", True, [
+                ("Orientation", "2026-08-31", None, ""), ("First day of programming", "2026-09-08", None, ""), ("Fall Break (Closed)", "2026-10-12", "2026-10-13", ""), ("Thanksgiving Break (Closed)", "2026-11-25", "2026-11-27", ""), ("Winter Break (Closed)", "2026-12-21", "2027-01-05", ""), ("Program Resumes", "2027-01-06", None, ""), ("Martin Luther King Day (Closed)", "2027-01-18", None, ""), ("President’s Day Holiday (Closed)", "2027-02-15", "2027-02-16", ""), ("Spring Break (Closed)", "2027-03-08", "2027-03-12", ""), ("Program Resumes", "2027-03-15", None, ""), ("Holiday Break (Closed)", "2027-03-26", "2027-03-29", ""), ("Last Day of programming", "2027-05-21", None, ""), ("Summer Break (Closed)", "2027-05-24", "2027-09-07", ""),
+            ]),
+        ]
+        for school_year, is_current, events in calendar_seed:
+            calendar = db.scalar(select(AcademicCalendar).where(AcademicCalendar.school_year == school_year))
+            if calendar is None:
+                calendar = AcademicCalendar(school_year=school_year, title=f"{school_year} Academic Calendar", is_current=is_current, published=True)
+                db.add(calendar)
+                db.flush()
+                db.add_all([CalendarEvent(calendar_id=calendar.id, title=title, start_date=date.fromisoformat(start), end_date=date.fromisoformat(end) if end else None, description=description, sort_order=(index + 1) * 10) for index, (title, start, end, description) in enumerate(events)])
         db.commit()
 
 
@@ -303,6 +422,50 @@ class SiteConfigurationInput(BaseModel):
     school_year: str = Field(min_length=1, max_length=40)
 
 
+class PolicyInput(BaseModel):
+    title: str = Field(min_length=1, max_length=180)
+    body: str = Field(min_length=1, max_length=20000)
+    published: bool = True
+    sort_order: int = Field(default=0, ge=0, le=10000)
+
+
+class AcademicCalendarInput(BaseModel):
+    school_year: str = Field(min_length=4, max_length=40)
+    title: str = Field(min_length=1, max_length=180)
+    notes: str = Field(default="", max_length=5000)
+    is_current: bool = False
+    published: bool = False
+
+
+class AcademicCalendarCreate(AcademicCalendarInput):
+    copy_from_id: int | None = None
+
+
+class CalendarEventInput(BaseModel):
+    title: str = Field(min_length=1, max_length=180)
+    start_date: date
+    end_date: date | None = None
+    description: str = Field(default="", max_length=500)
+    sort_order: int = Field(default=0, ge=0, le=10000)
+
+    @field_validator("end_date")
+    @classmethod
+    def end_not_before_start(cls, value, info):
+        start = info.data.get("start_date")
+        if value and start and value < start:
+            raise ValueError("End date must be on or after the start date.")
+        return value
+
+
+def shift_calendar_date(value: date | None, years: int) -> date | None:
+    if value is None or years == 0:
+        return value
+    try:
+        return value.replace(year=value.year + years)
+    except ValueError:  # A Feb. 29 event copied to a non-leap year.
+        return value.replace(year=value.year + years, day=28)
+
+
 def allowed_admin_origin(request: Request) -> None:
     origin = request.headers.get("origin", "")
     if origin not in origins:
@@ -356,6 +519,24 @@ def config_to_dict(row: SiteConfiguration) -> dict:
             "tuition_2_days": row.tuition_2_days, "tuition_3_days": row.tuition_3_days,
             "tuition_5_days": row.tuition_5_days, "registration_fee": row.registration_fee,
             "school_year": row.school_year, "updated_at": row.updated_at}
+
+
+def policy_to_dict(section: PolicySection) -> dict:
+    return {"id": section.id, "slug": section.slug, "title": section.title, "body": section.body,
+            "published": section.published, "sort_order": section.sort_order, "updated_at": section.updated_at}
+
+
+def calendar_event_to_dict(event: CalendarEvent) -> dict:
+    return {"id": event.id, "calendar_id": event.calendar_id, "title": event.title,
+            "start_date": event.start_date.isoformat(), "end_date": event.end_date.isoformat() if event.end_date else None,
+            "description": event.description, "sort_order": event.sort_order}
+
+
+def calendar_to_dict(calendar: AcademicCalendar, db, include_draft: bool = False) -> dict:
+    events = db.scalars(select(CalendarEvent).where(CalendarEvent.calendar_id == calendar.id).order_by(CalendarEvent.start_date, CalendarEvent.sort_order, CalendarEvent.id)).all()
+    return {"id": calendar.id, "school_year": calendar.school_year, "title": calendar.title,
+            "notes": calendar.notes, "is_current": calendar.is_current, "published": calendar.published,
+            "events": [calendar_event_to_dict(event) for event in events]}
 
 
 def notify_academy(inquiry: Inquiry) -> bool:
@@ -577,6 +758,22 @@ def list_public_news():
         return [news_to_dict(post) for post in posts]
 
 
+@app.get("/api/policies")
+def list_public_policies():
+    with SessionLocal() as db:
+        sections = db.scalars(
+            select(PolicySection).where(PolicySection.published.is_(True)).order_by(PolicySection.sort_order, PolicySection.id)
+        ).all()
+        return [policy_to_dict(section) for section in sections]
+
+
+@app.get("/api/calendars")
+def list_public_calendars():
+    with SessionLocal() as db:
+        calendars = db.scalars(select(AcademicCalendar).where(AcademicCalendar.published.is_(True)).order_by(AcademicCalendar.is_current.desc(), AcademicCalendar.school_year.desc())).all()
+        return [calendar_to_dict(calendar, db) for calendar in calendars]
+
+
 @app.get("/api/media")
 def list_public_media(kind: Literal["photo", "video"] | None = None):
     with SessionLocal() as db:
@@ -601,6 +798,167 @@ def list_admin_news(_: str = Depends(require_admin)):
     with SessionLocal() as db:
         posts = db.scalars(select(NewsPost).order_by(NewsPost.updated_at.desc())).all()
         return [news_to_dict(post) for post in posts]
+
+
+@app.get("/api/admin/policies")
+def list_admin_policies(_: str = Depends(require_admin)):
+    with SessionLocal() as db:
+        sections = db.scalars(select(PolicySection).order_by(PolicySection.sort_order, PolicySection.id)).all()
+        return [policy_to_dict(section) for section in sections]
+
+
+@app.get("/api/admin/calendars")
+def list_admin_calendars(_: str = Depends(require_admin)):
+    with SessionLocal() as db:
+        calendars = db.scalars(select(AcademicCalendar).order_by(AcademicCalendar.is_current.desc(), AcademicCalendar.school_year.desc())).all()
+        return [calendar_to_dict(calendar, db) for calendar in calendars]
+
+
+@app.post("/api/admin/calendars", status_code=201)
+def create_academic_calendar(payload: AcademicCalendarCreate, request: Request, _: str = Depends(require_admin)):
+    allowed_admin_origin(request)
+    with SessionLocal() as db:
+        if db.scalar(select(AcademicCalendar.id).where(AcademicCalendar.school_year == payload.school_year.strip())):
+            raise HTTPException(status_code=409, detail="That school year already has a calendar.")
+        source = db.get(AcademicCalendar, payload.copy_from_id) if payload.copy_from_id is not None else None
+        if payload.copy_from_id is not None and source is None:
+            raise HTTPException(status_code=404, detail="The calendar selected for copying was not found.")
+        if payload.is_current:
+            db.execute(update(AcademicCalendar).values(is_current=False))
+        values = payload.model_dump(exclude={"copy_from_id"})
+        calendar = AcademicCalendar(**{**values, "school_year": payload.school_year.strip(), "title": payload.title.strip(), "notes": payload.notes.strip()})
+        db.add(calendar)
+        db.flush()
+        if source is not None:
+            source_year = re.match(r"^\s*(\d{4})", source.school_year)
+            target_year = re.match(r"^\s*(\d{4})", calendar.school_year)
+            year_delta = int(target_year.group(1)) - int(source_year.group(1)) if source_year and target_year else 0
+            source_events = db.scalars(select(CalendarEvent).where(CalendarEvent.calendar_id == source.id).order_by(CalendarEvent.start_date, CalendarEvent.sort_order, CalendarEvent.id)).all()
+            db.add_all([CalendarEvent(
+                calendar_id=calendar.id,
+                title=event.title,
+                start_date=shift_calendar_date(event.start_date, year_delta),
+                end_date=shift_calendar_date(event.end_date, year_delta),
+                description=event.description,
+                sort_order=event.sort_order,
+            ) for event in source_events])
+        db.commit()
+        db.refresh(calendar)
+        return calendar_to_dict(calendar, db)
+
+
+@app.put("/api/admin/calendars/{calendar_id}")
+def update_academic_calendar(calendar_id: int, payload: AcademicCalendarInput, request: Request, _: str = Depends(require_admin)):
+    allowed_admin_origin(request)
+    with SessionLocal() as db:
+        calendar = db.get(AcademicCalendar, calendar_id)
+        if calendar is None:
+            raise HTTPException(status_code=404, detail="Calendar not found.")
+        duplicate = db.scalar(select(AcademicCalendar.id).where(AcademicCalendar.school_year == payload.school_year.strip(), AcademicCalendar.id != calendar_id))
+        if duplicate:
+            raise HTTPException(status_code=409, detail="That school year already has a calendar.")
+        if payload.is_current:
+            db.execute(update(AcademicCalendar).where(AcademicCalendar.id != calendar_id).values(is_current=False))
+        for key, value in payload.model_dump().items():
+            setattr(calendar, key, value.strip() if isinstance(value, str) else value)
+        db.commit()
+        db.refresh(calendar)
+        return calendar_to_dict(calendar, db)
+
+
+@app.delete("/api/admin/calendars/{calendar_id}")
+def delete_academic_calendar(calendar_id: int, request: Request, _: str = Depends(require_admin)):
+    allowed_admin_origin(request)
+    with SessionLocal() as db:
+        calendar = db.get(AcademicCalendar, calendar_id)
+        if calendar is None:
+            raise HTTPException(status_code=404, detail="Calendar not found.")
+        db.query(CalendarEvent).filter(CalendarEvent.calendar_id == calendar_id).delete(synchronize_session=False)
+        db.delete(calendar)
+        db.commit()
+    return {"status": "deleted"}
+
+
+@app.post("/api/admin/calendars/{calendar_id}/events", status_code=201)
+def create_calendar_event(calendar_id: int, payload: CalendarEventInput, request: Request, _: str = Depends(require_admin)):
+    allowed_admin_origin(request)
+    with SessionLocal() as db:
+        if db.get(AcademicCalendar, calendar_id) is None:
+            raise HTTPException(status_code=404, detail="Calendar not found.")
+        event = CalendarEvent(calendar_id=calendar_id, **payload.model_dump())
+        db.add(event)
+        db.commit()
+        db.refresh(event)
+        return calendar_event_to_dict(event)
+
+
+@app.put("/api/admin/calendar-events/{event_id}")
+def update_calendar_event(event_id: int, payload: CalendarEventInput, request: Request, _: str = Depends(require_admin)):
+    allowed_admin_origin(request)
+    with SessionLocal() as db:
+        event = db.get(CalendarEvent, event_id)
+        if event is None:
+            raise HTTPException(status_code=404, detail="Calendar event not found.")
+        for key, value in payload.model_dump().items():
+            setattr(event, key, value)
+        db.commit()
+        db.refresh(event)
+        return calendar_event_to_dict(event)
+
+
+@app.delete("/api/admin/calendar-events/{event_id}")
+def delete_calendar_event(event_id: int, request: Request, _: str = Depends(require_admin)):
+    allowed_admin_origin(request)
+    with SessionLocal() as db:
+        event = db.get(CalendarEvent, event_id)
+        if event is None:
+            raise HTTPException(status_code=404, detail="Calendar event not found.")
+        db.delete(event)
+        db.commit()
+    return {"status": "deleted"}
+
+
+@app.post("/api/admin/policies", status_code=201)
+def create_policy(payload: PolicyInput, request: Request, _: str = Depends(require_admin)):
+    allowed_admin_origin(request)
+    with SessionLocal() as db:
+        section = PolicySection(slug="pending", title=payload.title.strip(), body=payload.body.strip(),
+                                published=payload.published, sort_order=payload.sort_order)
+        db.add(section)
+        db.flush()
+        section.slug = make_slug(section.title, section.id)
+        db.commit()
+        db.refresh(section)
+        return policy_to_dict(section)
+
+
+@app.put("/api/admin/policies/{section_id}")
+def update_policy(section_id: int, payload: PolicyInput, request: Request, _: str = Depends(require_admin)):
+    allowed_admin_origin(request)
+    with SessionLocal() as db:
+        section = db.get(PolicySection, section_id)
+        if section is None:
+            raise HTTPException(status_code=404, detail="Policy section not found.")
+        section.title = payload.title.strip()
+        section.slug = make_slug(section.title, section.id)
+        section.body = payload.body.strip()
+        section.published = payload.published
+        section.sort_order = payload.sort_order
+        db.commit()
+        db.refresh(section)
+        return policy_to_dict(section)
+
+
+@app.delete("/api/admin/policies/{section_id}")
+def delete_policy(section_id: int, request: Request, _: str = Depends(require_admin)):
+    allowed_admin_origin(request)
+    with SessionLocal() as db:
+        section = db.get(PolicySection, section_id)
+        if section is None:
+            raise HTTPException(status_code=404, detail="Policy section not found.")
+        db.delete(section)
+        db.commit()
+    return {"status": "deleted"}
 
 
 def make_slug(title: str, post_id: int | None = None) -> str:

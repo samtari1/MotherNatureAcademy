@@ -12,7 +12,7 @@ export default function RegisterPage() {
       <div className="register-aside"><div className="aside-icon"><Sprout/></div>
         <h2>Let’s get<br/><em>started.</em></h2>
         <p>This is an application, not a confirmed enrollment. The academy will contact you after reviewing the information.</p>
-        <div className="aside-contact"><p><Mail size={16}/><a href="mailto:Laura@MotherNatureAcademy.com">Laura@MotherNatureAcademy.com</a></p><p><Phone size={16}/><a href="tel:+19109862836">(910) 986-2836</a></p></div>
+        <div className="aside-contact"><p><Mail size={16}/><a href="mailto:Laura@MotherNatureAcademy.com">Laura@MotherNatureAcademy.com</a></p><p><Phone size={16}/><a href="tel:+19109862836">Laura · (910) 986-2836</a></p><p><Mail size={16}/><a href="mailto:Elise@MotherNatureAcademy.com">Elise@MotherNatureAcademy.com</a></p><p><Phone size={16}/><a href="tel:+19109754541">Elise · (910) 975-4541</a></p></div>
         <div className="privacy-note">This form does not ask for medical, medication, allergy, immunization, or payment information. Please do not send those details by email. The academy can follow up directly if needed.</div>
       </div>
       <div className="register-card"><h2>Registration application</h2><p>Fields marked <span>*</span> are required.</p><RegistrationForm/></div>

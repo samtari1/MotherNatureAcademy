@@ -46,7 +46,7 @@ export function RegisterForm() {
     </div>
     <div className="form-submit"><button className="button" type="submit" disabled={state === "sending"}>{state === "sending" ? "Sending…" : "Send inquiry"}<span aria-hidden="true">↗</span></button><small>We’ll follow up by email or phone. Sending this form is an inquiry, not a confirmed enrollment.</small></div>
     {state === "sent" && <p className="form-success" role="status">Thank you! Your inquiry was saved and the academy was emailed. We’ll be in touch soon.</p>}
-    {state === "saved_without_email" && <p className="form-error" role="status">Your inquiry was saved, but the academy’s email notification could not be sent. Please also contact us at <a href="mailto:Laura@MotherNatureAcademy.com">Laura@MotherNatureAcademy.com</a> or call (910) 986-2836.</p>}
+    {state === "saved_without_email" && <p className="form-error" role="status">Your inquiry was saved, but the academy’s email notification could not be sent. Please contact <a href="mailto:Laura@MotherNatureAcademy.com">Laura</a> at (910) 986-2836 or <a href="mailto:Elise@MotherNatureAcademy.com">Elise</a> at (910) 975-4541.</p>}
     {state === "error" && <p className="form-error" role="alert">{error}</p>}
   </form>;
 }

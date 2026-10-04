@@ -69,7 +69,7 @@ export function RegistrationForm() {
     </div>
     <div className="form-submit"><button className="button" type="submit" disabled={state === "sending"}>{state === "sending" ? "Submitting…" : "Submit application"}<span aria-hidden="true">↗</span></button><small>The academy will review the application and follow up. Submission is not confirmed enrollment.</small></div>
     {state === "sent" && <p className="form-success" role="status">Your application was submitted and an email notification was sent to the academy. The academy will follow up about next steps.</p>}
-    {state === "saved_without_email" && <p className="form-error" role="status">Your application was saved, but the email notification could not be sent. Please contact <a href="mailto:Laura@MotherNatureAcademy.com">Laura@MotherNatureAcademy.com</a> or call (910) 986-2836.</p>}
+    {state === "saved_without_email" && <p className="form-error" role="status">Your application was saved, but the email notification could not be sent. Please contact <a href="mailto:Laura@MotherNatureAcademy.com">Laura</a> at (910) 986-2836 or <a href="mailto:Elise@MotherNatureAcademy.com">Elise</a> at (910) 975-4541.</p>}
     {state === "error" && <p className="form-error" role="alert">{error}</p>}
   </form>;
 }
