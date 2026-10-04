@@ -2,7 +2,8 @@
 
 import { FormEvent, useState } from "react";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const INQUIRY_URL = `${API_BASE.replace(/\/+$/, "")}/api/inquiries`;
 
 export function RegisterForm() {
   const [state, setState] = useState<"idle" | "sending" | "sent" | "saved_without_email" | "error">("idle");
@@ -15,7 +16,7 @@ export function RegisterForm() {
     const form = event.currentTarget;
     const data = Object.fromEntries(new FormData(form).entries());
     try {
-      const response = await fetch(`${API_URL}/api/inquiries`, {
+      const response = await fetch(INQUIRY_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
