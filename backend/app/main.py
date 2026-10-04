@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timezone
 from email.message import EmailMessage
+from html import escape
 from pathlib import Path
 import smtplib
 import ssl
@@ -732,34 +733,85 @@ def notify_registration(registration: Registration) -> bool:
         "3_days": "Monday, Wednesday, and Friday — $425/month",
         "5_days": "Monday through Friday — $575/month",
     }
+    submitted_at = registration.created_at.strftime("%Y-%m-%d %H:%M UTC")
+    child_rows = [
+        ("Child", registration.child_name),
+        ("Nickname", registration.child_nickname or "Not provided"),
+        ("Age", registration.child_age),
+        ("Date of birth", registration.child_date_of_birth.isoformat()),
+        ("Lives with", registration.lives_with),
+        ("Schedule", schedules[registration.schedule]),
+    ]
+    guardian_rows = [
+        ("Name", registration.guardian_name),
+        ("Relationship", registration.guardian_relationship),
+        ("Address", f"{registration.address}, {registration.city}, {registration.state} {registration.postal_code}"),
+        ("Cell phone", registration.cell_phone),
+        ("Home phone", registration.home_phone or "Not provided"),
+        ("Work phone", registration.work_phone or "Not provided"),
+        ("Email", registration.guardian_email),
+    ]
+    second_guardian_rows = [
+        ("Name", registration.second_guardian_name or "Not provided"),
+        ("Relationship", registration.second_guardian_relationship or "Not provided"),
+        ("Phone", registration.second_guardian_phone or "Not provided"),
+        ("Email", registration.second_guardian_email or "Not provided"),
+    ]
+
+    def plain_section(title: str, rows: list[tuple[str, str]]) -> str:
+        return title + "\n" + "\n".join(f"{label}: {value}" for label, value in rows)
+
+    def html_section(title: str, rows: list[tuple[str, str]]) -> str:
+        cells = "".join(
+            "<tr>"
+            f'<td style="padding:9px 12px;border-bottom:1px solid #e7ebe5;color:#69766c;width:36%;vertical-align:top">{escape(label)}</td>'
+            f'<td style="padding:9px 12px;border-bottom:1px solid #e7ebe5;color:#27372d;vertical-align:top;word-break:break-word">{escape(str(value))}</td>'
+            "</tr>"
+            for label, value in rows
+        )
+        return (
+            '<h2 style="margin:25px 0 8px;font:600 17px Arial,sans-serif;color:#315743">'
+            f"{escape(title)}</h2>"
+            '<table role="presentation" style="width:100%;border-collapse:collapse;background:#fff">'
+            f"{cells}</table>"
+        )
+
     msg = EmailMessage()
-    msg["Subject"] = "New Mother Nature Academy registration application"
+    msg["Subject"] = f"New registration application — {registration.child_name}"
     msg["From"] = mail.sender
     msg["To"] = mail.recipient
     msg["Reply-To"] = registration.guardian_email
     msg.set_content(
-        "A registration application was submitted through the academy website.\n\n"
-        f"School year: {registration.school_year}\n"
-        f"Child: {registration.child_name}\n"
-        f"Nickname: {registration.child_nickname or 'Not provided'}\n"
-        f"Age: {registration.child_age}\n"
-        f"Date of birth: {registration.child_date_of_birth.isoformat()}\n"
-        f"Lives with: {registration.lives_with}\n"
-        f"Schedule: {schedules[registration.schedule]}\n\n"
-        f"Responsible party: {registration.guardian_name}\n"
-        f"Relationship: {registration.guardian_relationship}\n"
-        f"Address: {registration.address}, {registration.city}, {registration.state} {registration.postal_code}\n"
-        f"Home phone: {registration.home_phone or 'Not provided'}\n"
-        f"Cell phone: {registration.cell_phone}\n"
-        f"Work phone: {registration.work_phone or 'Not provided'}\n"
-        f"Email: {registration.guardian_email}\n\n"
-        f"Second responsible party: {registration.second_guardian_name or 'Not provided'}\n"
-        f"Relationship: {registration.second_guardian_relationship or 'Not provided'}\n"
-        f"Phone: {registration.second_guardian_phone or 'Not provided'}\n"
-        f"Email: {registration.second_guardian_email or 'Not provided'}\n\n"
-        f"Typed signature: {registration.signature}\n"
-        f"Submitted at (UTC): {registration.created_at.isoformat()}\n\n"
-        "Medical, medication, allergy, immunization, and payment details are not collected by this web form."
+        "NEW REGISTRATION APPLICATION\n"
+        f"Mother Nature Academy · School year {registration.school_year}\n"
+        f"Submitted {submitted_at}\n\n"
+        + plain_section("CHILD & SCHEDULE", child_rows)
+        + "\n\n" + plain_section("RESPONSIBLE PARTY", guardian_rows)
+        + "\n\n" + plain_section("SECOND RESPONSIBLE PARTY", second_guardian_rows)
+        + f"\n\nSIGNATURE & ACKNOWLEDGMENT\nTyped signature: {registration.signature}\n"
+        "The family confirmed the application details and acknowledged that submission does not guarantee enrollment.\n\n"
+        "Privacy note: Medical, medication, allergy, immunization, and payment details are not collected by this web form."
+    )
+    msg.add_alternative(
+        '<!doctype html><html><body style="margin:0;padding:24px;background:#f3f5f1;font-family:Arial,Helvetica,sans-serif;color:#27372d">'
+        '<table role="presentation" style="width:100%;max-width:720px;margin:0 auto;border-collapse:collapse;background:#fff">'
+        '<tr><td style="padding:26px 28px;background:#315743;color:#fff">'
+        '<div style="font-size:11px;letter-spacing:1.4px;text-transform:uppercase;color:#dce8dc">Mother Nature Academy</div>'
+        '<h1 style="margin:8px 0 5px;font-size:24px;line-height:1.25">New registration application</h1>'
+        f'<div style="font-size:14px;color:#edf3ec">School year {escape(registration.school_year)}</div>'
+        f'<div style="margin-top:7px;font-size:12px;color:#dce8dc">Submitted {escape(submitted_at)}</div>'
+        '</td></tr><tr><td style="padding:10px 28px 28px">'
+        + html_section("Child & schedule", child_rows)
+        + html_section("Responsible party", guardian_rows)
+        + html_section("Second responsible party", second_guardian_rows)
+        + '<h2 style="margin:25px 0 8px;font:600 17px Arial,sans-serif;color:#315743">Signature & acknowledgment</h2>'
+        + '<p style="margin:0;padding:12px;background:#f3f5f1;font-size:13px;line-height:1.6">'
+        + f'<strong>Typed signature:</strong> {escape(registration.signature)}<br>'
+        + 'The family confirmed the application details and acknowledged that submission does not guarantee enrollment.</p>'
+        + '<p style="margin:18px 0 0;color:#758075;font-size:11px;line-height:1.6">'
+        + 'Privacy note: Medical, medication, allergy, immunization, and payment details are not collected by this web form.</p>'
+        + '</td></tr></table></body></html>',
+        subtype="html",
     )
     context = ssl.create_default_context()
     if mail.port == 465:
