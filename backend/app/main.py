@@ -4,6 +4,7 @@ from email.message import EmailMessage
 import smtplib
 import ssl
 import time
+import logging
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException
@@ -12,6 +13,8 @@ from pydantic import BaseModel, EmailStr, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import DateTime, Integer, String, Text, create_engine, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
+
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -131,7 +134,7 @@ def health():
 def create_inquiry(payload: InquiryCreate):
     # A hidden honeypot catches basic automated submissions without exposing a challenge to families.
     if payload.website:
-        return {"status": "received"}
+        return {"status": "received", "notification_sent": True}
 
     now = time.time()
 
@@ -154,11 +157,15 @@ def create_inquiry(payload: InquiryCreate):
         db.add(row)
         db.commit()
         db.refresh(row)
+        notification_sent = False
         try:
-            if notify_academy(row):
+            notification_sent = notify_academy(row)
+            if notification_sent:
                 row.notification_sent_at = datetime.now(timezone.utc)
                 db.commit()
+            else:
+                logger.warning("SMTP is not configured; inquiry %s was saved without email notification", row.id)
         except (OSError, smtplib.SMTPException):
             # The inquiry remains safely stored for follow-up if email delivery is unavailable.
-            pass
-        return {"status": "received", "id": row.id}
+            logger.exception("Email notification failed for inquiry %s", row.id)
+        return {"status": "received", "id": row.id, "notification_sent": notification_sent}

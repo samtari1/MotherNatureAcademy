@@ -5,7 +5,7 @@ import { FormEvent, useState } from "react";
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 export function RegisterForm() {
-  const [state, setState] = useState<"idle" | "sending" | "sent" | "error">("idle");
+  const [state, setState] = useState<"idle" | "sending" | "sent" | "saved_without_email" | "error">("idle");
   const [error, setError] = useState("");
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -20,12 +20,12 @@ export function RegisterForm() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       });
+      const result = await response.json().catch(() => ({}));
       if (!response.ok) {
-        const body = await response.json().catch(() => ({}));
-        throw new Error(body.detail || "We couldn't send your request. Please try again or email us.");
+        throw new Error(result.detail || "We couldn't submit your request. Please try again or email us.");
       }
       form.reset();
-      setState("sent");
+      setState(result.notification_sent ? "sent" : "saved_without_email");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
       setState("error");
@@ -45,7 +45,8 @@ export function RegisterForm() {
       <div className="form-trap" aria-hidden="true"><label>Leave this field blank<input name="website" tabIndex={-1} autoComplete="off" /></label></div>
     </div>
     <div className="form-submit"><button className="button" type="submit" disabled={state === "sending"}>{state === "sending" ? "Sending…" : "Send inquiry"}<span aria-hidden="true">↗</span></button><small>We’ll follow up by email or phone. Sending this form is an inquiry, not a confirmed enrollment.</small></div>
-    {state === "sent" && <p className="form-success" role="status">Thank you! Your inquiry has been sent. We’ll be in touch soon.</p>}
+    {state === "sent" && <p className="form-success" role="status">Thank you! Your inquiry was saved and the academy was emailed. We’ll be in touch soon.</p>}
+    {state === "saved_without_email" && <p className="form-error" role="status">Your inquiry was saved, but the academy’s email notification could not be sent. Please also contact us at <a href="mailto:Laura@MotherNatureAcademy.com">Laura@MotherNatureAcademy.com</a> or call (910) 986-2836.</p>}
     {state === "error" && <p className="form-error" role="alert">{error}</p>}
   </form>;
 }
