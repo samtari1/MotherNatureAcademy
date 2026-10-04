@@ -1,6 +1,6 @@
 import Link from "next/link";
 import Image from "next/image";
-import { MapPin, Phone, Mail } from "lucide-react";
+import { FooterContactInfo, FooterCopyright } from "@/components/contact-details";
 
 export function SiteFooter() {
   return (
@@ -12,18 +12,14 @@ export function SiteFooter() {
         </div>
         <div className="footer-contact">
           <h3>Come say hello</h3>
-          <p><MapPin size={16} /> Carthage, North Carolina</p>
-          <p><Phone size={16} /> <a href="tel:+19109862836">Laura · (910) 986-2836</a></p>
-          <p><Mail size={16} /> <a href="mailto:Laura@MotherNatureAcademy.com">Laura@MotherNatureAcademy.com</a></p>
-          <p><Phone size={16} /> <a href="tel:+19109754541">Elise · (910) 975-4541</a></p>
-          <p><Mail size={16} /> <a href="mailto:Elise@MotherNatureAcademy.com">Elise@MotherNatureAcademy.com</a></p>
+          <FooterContactInfo />
         </div>
         <div className="footer-links">
           <h3>Explore</h3>
           <Link href="/program">Our approach</Link><Link href="/curriculum">Curriculum</Link><Link href="/hours">Hours & tuition</Link><Link href="/calendar">Academic calendar</Link><Link href="/policies">Policies & handbook</Link><Link href="/news">News & notes</Link><Link href="/register">Registration inquiry</Link><Link href="/admin">Academy admin</Link>
         </div>
       </div>
-      <div className="footer-bottom"><span>© {new Date().getFullYear()} Mother Nature Academy LLC</span><span>Made for little explorers and the people who love them.</span></div>
+      <div className="footer-bottom"><FooterCopyright /><span>Made for little explorers and the people who love them.</span></div>
     </footer>
   );
 }

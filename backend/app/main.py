@@ -9,9 +9,11 @@ import logging
 import hmac
 import re
 import uuid
+from dataclasses import dataclass
 from typing import Literal
 from urllib.parse import parse_qs, urlencode, urlparse
 
+from cryptography.fernet import Fernet, InvalidToken
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr, Field, field_validator
@@ -36,6 +38,7 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     smtp_from: str = ""
     smtp_starttls: bool = True
+    smtp_config_encryption_key: str = ""
     admin_username: str = ""
     admin_password_hash: str = ""
     admin_session_secret: str = ""
@@ -150,6 +153,45 @@ class SiteConfiguration(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
 
 
+class ContactConfiguration(Base):
+    __tablename__ = "contact_configuration"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    business_name: Mapped[str] = mapped_column(String(180), nullable=False)
+    physical_street: Mapped[str] = mapped_column(String(200), nullable=False)
+    physical_city: Mapped[str] = mapped_column(String(100), nullable=False)
+    physical_state: Mapped[str] = mapped_column(String(80), nullable=False)
+    physical_postal_code: Mapped[str] = mapped_column(String(20), nullable=False)
+    mailing_street: Mapped[str] = mapped_column(String(200), nullable=False)
+    mailing_city: Mapped[str] = mapped_column(String(100), nullable=False)
+    mailing_state: Mapped[str] = mapped_column(String(80), nullable=False)
+    mailing_postal_code: Mapped[str] = mapped_column(String(20), nullable=False)
+    educator_1_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    educator_1_title: Mapped[str] = mapped_column(String(80), nullable=False, default="")
+    educator_1_phone: Mapped[str] = mapped_column(String(40), nullable=False)
+    educator_1_email: Mapped[str] = mapped_column(String(254), nullable=False)
+    educator_2_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    educator_2_title: Mapped[str] = mapped_column(String(80), nullable=False, default="")
+    educator_2_phone: Mapped[str] = mapped_column(String(40), nullable=False)
+    educator_2_email: Mapped[str] = mapped_column(String(254), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
+
+
+class MailConfiguration(Base):
+    __tablename__ = "mail_configuration"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    smtp_host: Mapped[str] = mapped_column(String(255), nullable=False)
+    smtp_port: Mapped[int] = mapped_column(Integer, nullable=False, default=587)
+    smtp_user: Mapped[str] = mapped_column(String(254), nullable=False)
+    smtp_password_encrypted: Mapped[str | None] = mapped_column(Text)
+    smtp_from: Mapped[str] = mapped_column(String(254), nullable=False)
+    notification_email: Mapped[str] = mapped_column(String(254), nullable=False)
+    smtp_starttls: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
+
+
 class AcademicCalendar(Base):
     __tablename__ = "academic_calendars"
 
@@ -210,6 +252,16 @@ def seed_content() -> None:
                 registration_fee="$100",
                 school_year="2026–2027",
             ))
+        if db.get(ContactConfiguration, 1) is None:
+            db.add(ContactConfiguration(
+                id=1, business_name="Mother Nature Academy LLC",
+                physical_street="148 Hill Lane", physical_city="Carthage", physical_state="NC", physical_postal_code="28327",
+                mailing_street="PO Box 2597", mailing_city="Southern Pines", mailing_state="NC", mailing_postal_code="28388",
+                educator_1_name="Laura Snyder", educator_1_title="Miss Laura", educator_1_phone="(910) 986-2836",
+                educator_1_email="Laura@MotherNatureAcademy.com",
+                educator_2_name="Elise Snyder", educator_2_title="Miss CC", educator_2_phone="(910) 975-4541",
+                educator_2_email="Elise@MotherNatureAcademy.com",
+            ))
         if db.scalar(select(MediaItem.id).limit(1)) is None:
             seed_items = [
                 ("photo", "Pond", "Time outside by the pond", "Pond and trees on the academy grounds", "/images/pond.jpg", 10),
@@ -255,6 +307,7 @@ def seed_content() -> None:
             if db.scalar(select(MediaItem.id).where(MediaItem.url == url)) is None:
                 db.add(MediaItem(kind="photo", title=title, caption=caption, alt_text=alt_text, url=url, sort_order=70 + index * 10))
         legacy_videos = [
+            ("Introduction to Forest School", "A short introduction to child-led learning outdoors, shared on the legacy preschool program page.", "https://www.youtube.com/embed/ptkID2k091I", 90),
             ("Nature Kindergarten — Frances Krusekopf", "A short film about nature kindergarten and outdoor early learning.", "https://www.youtube.com/embed/MOngsiy67YY", 100),
             ("The Cridge Nature Preschool — Shaw TV Victoria", "A look at the Cridge nature preschool program.", "https://www.youtube.com/embed/VYThQPwwXuc", 110),
         ]
@@ -422,6 +475,47 @@ class SiteConfigurationInput(BaseModel):
     school_year: str = Field(min_length=1, max_length=40)
 
 
+class ContactConfigurationInput(BaseModel):
+    business_name: str = Field(min_length=1, max_length=180)
+    physical_street: str = Field(min_length=1, max_length=200)
+    physical_city: str = Field(min_length=1, max_length=100)
+    physical_state: str = Field(min_length=1, max_length=80)
+    physical_postal_code: str = Field(min_length=1, max_length=20)
+    mailing_street: str = Field(min_length=1, max_length=200)
+    mailing_city: str = Field(min_length=1, max_length=100)
+    mailing_state: str = Field(min_length=1, max_length=80)
+    mailing_postal_code: str = Field(min_length=1, max_length=20)
+    educator_1_name: str = Field(min_length=1, max_length=120)
+    educator_1_title: str = Field(default="", max_length=80)
+    educator_1_phone: str = Field(min_length=1, max_length=40)
+    educator_1_email: EmailStr
+    educator_2_name: str = Field(min_length=1, max_length=120)
+    educator_2_title: str = Field(default="", max_length=80)
+    educator_2_phone: str = Field(min_length=1, max_length=40)
+    educator_2_email: EmailStr
+
+    @field_validator("business_name", "physical_street", "physical_city", "physical_state", "physical_postal_code", "mailing_street", "mailing_city", "mailing_state", "mailing_postal_code", "educator_1_name", "educator_1_title", "educator_1_phone", "educator_2_name", "educator_2_title", "educator_2_phone", mode="before")
+    @classmethod
+    def trim_contact_fields(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+
+class SmtpConfigurationInput(BaseModel):
+    enabled: bool = True
+    smtp_host: str = Field(min_length=1, max_length=255)
+    smtp_port: int = Field(ge=1, le=65535)
+    smtp_user: str = Field(min_length=1, max_length=254)
+    smtp_password: str = Field(default="", max_length=1024)
+    smtp_from: EmailStr
+    notification_email: EmailStr
+    smtp_starttls: bool = True
+
+    @field_validator("smtp_host", "smtp_user", mode="before")
+    @classmethod
+    def strip_smtp_strings(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+
 class PolicyInput(BaseModel):
     title: str = Field(min_length=1, max_length=180)
     body: str = Field(min_length=1, max_length=20000)
@@ -521,6 +615,15 @@ def config_to_dict(row: SiteConfiguration) -> dict:
             "school_year": row.school_year, "updated_at": row.updated_at}
 
 
+def contact_to_dict(row: ContactConfiguration) -> dict:
+    return {key: getattr(row, key) for key in (
+        "business_name", "physical_street", "physical_city", "physical_state", "physical_postal_code",
+        "mailing_street", "mailing_city", "mailing_state", "mailing_postal_code",
+        "educator_1_name", "educator_1_title", "educator_1_phone", "educator_1_email",
+        "educator_2_name", "educator_2_title", "educator_2_phone", "educator_2_email",
+    )} | {"updated_at": row.updated_at}
+
+
 def policy_to_dict(section: PolicySection) -> dict:
     return {"id": section.id, "slug": section.slug, "title": section.title, "body": section.body,
             "published": section.published, "sort_order": section.sort_order, "updated_at": section.updated_at}
@@ -539,13 +642,55 @@ def calendar_to_dict(calendar: AcademicCalendar, db, include_draft: bool = False
             "events": [calendar_event_to_dict(event) for event in events]}
 
 
+@dataclass(frozen=True)
+class MailTransport:
+    enabled: bool
+    host: str
+    port: int
+    username: str
+    password: str
+    sender: str
+    recipient: str
+    starttls: bool
+
+
+def smtp_cipher() -> Fernet:
+    if not settings.smtp_config_encryption_key:
+        raise HTTPException(status_code=503, detail="Set SMTP_CONFIG_ENCRYPTION_KEY in backend/.env before saving a new SMTP password.")
+    try:
+        return Fernet(settings.smtp_config_encryption_key.encode("ascii"))
+    except (ValueError, UnicodeEncodeError) as exc:
+        raise HTTPException(status_code=503, detail="SMTP_CONFIG_ENCRYPTION_KEY must be a valid Fernet key.") from exc
+
+
+def get_mail_transport() -> MailTransport:
+    with SessionLocal() as db:
+        row = db.get(MailConfiguration, 1)
+        if row is None:
+            return MailTransport(
+                enabled=all([settings.smtp_host, settings.smtp_from, settings.smtp_user, settings.smtp_password]),
+                host=settings.smtp_host, port=settings.smtp_port, username=settings.smtp_user,
+                password=settings.smtp_password, sender=settings.smtp_from,
+                recipient=str(settings.notification_email), starttls=settings.smtp_starttls,
+            )
+        password = settings.smtp_password
+        if row.smtp_password_encrypted:
+            try:
+                password = smtp_cipher().decrypt(row.smtp_password_encrypted.encode("ascii")).decode("utf-8")
+            except InvalidToken as exc:
+                raise RuntimeError("Stored SMTP password cannot be decrypted. Check SMTP_CONFIG_ENCRYPTION_KEY.") from exc
+        return MailTransport(row.enabled, row.smtp_host, row.smtp_port, row.smtp_user, password,
+                             row.smtp_from, row.notification_email, row.smtp_starttls)
+
+
 def notify_academy(inquiry: Inquiry) -> bool:
-    if not all([settings.smtp_host, settings.smtp_from, settings.smtp_user, settings.smtp_password]):
+    mail = get_mail_transport()
+    if not mail.enabled or not all([mail.host, mail.sender, mail.username, mail.password]):
         return False
     msg = EmailMessage()
     msg["Subject"] = f"New website inquiry from {inquiry.parent_name}"
-    msg["From"] = settings.smtp_from
-    msg["To"] = str(settings.notification_email)
+    msg["From"] = mail.sender
+    msg["To"] = mail.recipient
     msg["Reply-To"] = inquiry.email
     msg.set_content(
         "A new Mother Nature Academy website inquiry was submitted.\n\n"
@@ -558,28 +703,29 @@ def notify_academy(inquiry: Inquiry) -> bool:
         f"Message:\n{inquiry.message or 'No message'}\n"
     )
     context = ssl.create_default_context()
-    if settings.smtp_port == 465:
+    if mail.port == 465:
         smtp_connection = smtplib.SMTP_SSL(
-            settings.smtp_host,
-            settings.smtp_port,
+            mail.host,
+            mail.port,
             timeout=12,
             context=context,
         )
     else:
-        smtp_connection = smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=12)
+        smtp_connection = smtplib.SMTP(mail.host, mail.port, timeout=12)
 
     with smtp_connection as smtp:
         smtp.ehlo()
-        if settings.smtp_starttls and settings.smtp_port != 465:
+        if mail.starttls and mail.port != 465:
             smtp.starttls(context=context)
             smtp.ehlo()
-        smtp.login(settings.smtp_user, settings.smtp_password)
+        smtp.login(mail.username, mail.password)
         smtp.send_message(msg)
     return True
 
 
 def notify_registration(registration: Registration) -> bool:
-    if not all([settings.smtp_host, settings.smtp_from, settings.smtp_user, settings.smtp_password]):
+    mail = get_mail_transport()
+    if not mail.enabled or not all([mail.host, mail.sender, mail.username, mail.password]):
         return False
     schedules = {
         "2_days": "Tuesday and Thursday — $325/month",
@@ -588,8 +734,8 @@ def notify_registration(registration: Registration) -> bool:
     }
     msg = EmailMessage()
     msg["Subject"] = "New Mother Nature Academy registration application"
-    msg["From"] = settings.smtp_from
-    msg["To"] = str(settings.notification_email)
+    msg["From"] = mail.sender
+    msg["To"] = mail.recipient
     msg["Reply-To"] = registration.guardian_email
     msg.set_content(
         "A registration application was submitted through the academy website.\n\n"
@@ -616,16 +762,16 @@ def notify_registration(registration: Registration) -> bool:
         "Medical, medication, allergy, immunization, and payment details are not collected by this web form."
     )
     context = ssl.create_default_context()
-    if settings.smtp_port == 465:
-        smtp_connection = smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, timeout=12, context=context)
+    if mail.port == 465:
+        smtp_connection = smtplib.SMTP_SSL(mail.host, mail.port, timeout=12, context=context)
     else:
-        smtp_connection = smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=12)
+        smtp_connection = smtplib.SMTP(mail.host, mail.port, timeout=12)
     with smtp_connection as smtp:
         smtp.ehlo()
-        if settings.smtp_starttls and settings.smtp_port != 465:
+        if mail.starttls and mail.port != 465:
             smtp.starttls(context=context)
             smtp.ehlo()
-        smtp.login(settings.smtp_user, settings.smtp_password)
+        smtp.login(mail.username, mail.password)
         smtp.send_message(msg)
     return True
 
@@ -670,7 +816,7 @@ def create_inquiry(payload: InquiryCreate):
                 db.commit()
             else:
                 logger.warning("SMTP is not configured; inquiry %s was saved without email notification", row.id)
-        except (OSError, smtplib.SMTPException):
+        except Exception:
             # The inquiry remains safely stored for follow-up if email delivery is unavailable.
             logger.exception("Email notification failed for inquiry %s", row.id)
         return {"status": "received", "id": row.id, "notification_sent": notification_sent}
@@ -703,7 +849,7 @@ def create_registration(payload: RegistrationCreate):
                 db.commit()
             else:
                 logger.warning("SMTP is not configured; registration %s was saved without email notification", row.id)
-        except (OSError, smtplib.SMTPException):
+        except Exception:
             logger.exception("Registration email notification failed for registration %s", row.id)
         return {"status": "received", "id": row.id, "notification_sent": notification_sent}
 
@@ -791,6 +937,15 @@ def get_public_site_content():
         if row is None:
             raise HTTPException(status_code=503, detail="Site content is not ready.")
         return config_to_dict(row)
+
+
+@app.get("/api/contact-info")
+def get_public_contact_info():
+    with SessionLocal() as db:
+        row = db.get(ContactConfiguration, 1)
+        if row is None:
+            raise HTTPException(status_code=503, detail="Contact information is not ready.")
+        return contact_to_dict(row)
 
 
 @app.get("/api/admin/news")
@@ -1122,3 +1277,89 @@ def update_admin_site_content(payload: SiteConfigurationInput, request: Request,
         db.commit()
         db.refresh(row)
         return config_to_dict(row)
+
+
+@app.get("/api/admin/contact-info")
+def get_admin_contact_info(_: str = Depends(require_admin)):
+    with SessionLocal() as db:
+        row = db.get(ContactConfiguration, 1)
+        if row is None:
+            raise HTTPException(status_code=503, detail="Contact information is not ready.")
+        return contact_to_dict(row)
+
+
+@app.put("/api/admin/contact-info")
+def update_admin_contact_info(payload: ContactConfigurationInput, request: Request, _: str = Depends(require_admin)):
+    allowed_admin_origin(request)
+    values = payload.model_dump()
+    values["educator_1_email"] = str(payload.educator_1_email)
+    values["educator_2_email"] = str(payload.educator_2_email)
+    with SessionLocal() as db:
+        row = db.get(ContactConfiguration, 1)
+        if row is None:
+            row = ContactConfiguration(id=1, **values)
+            db.add(row)
+        else:
+            for key, value in values.items():
+                setattr(row, key, value)
+        db.commit()
+        db.refresh(row)
+        return contact_to_dict(row)
+
+
+def smtp_admin_dict(row: MailConfiguration | None) -> dict:
+    if row is None:
+        enabled = all([settings.smtp_host, settings.smtp_from, settings.smtp_user, settings.smtp_password])
+        host, port, user = settings.smtp_host, settings.smtp_port, settings.smtp_user
+        sender, recipient, starttls = settings.smtp_from, str(settings.notification_email), settings.smtp_starttls
+        password_set = bool(settings.smtp_password)
+    else:
+        enabled, host, port, user = row.enabled, row.smtp_host, row.smtp_port, row.smtp_user
+        sender, recipient, starttls = row.smtp_from, row.notification_email, row.smtp_starttls
+        password_set = bool(row.smtp_password_encrypted or settings.smtp_password)
+    key_ready = False
+    if settings.smtp_config_encryption_key:
+        try:
+            Fernet(settings.smtp_config_encryption_key.encode("ascii"))
+            key_ready = True
+        except (ValueError, UnicodeEncodeError):
+            pass
+    return {
+        "enabled": enabled, "smtp_host": host, "smtp_port": port, "smtp_user": user,
+        "smtp_from": sender, "notification_email": recipient, "smtp_starttls": starttls,
+        "smtp_password_set": password_set, "encryption_key_configured": key_ready,
+    }
+
+
+@app.get("/api/admin/smtp-settings")
+def get_admin_smtp_settings(_: str = Depends(require_admin)):
+    with SessionLocal() as db:
+        return smtp_admin_dict(db.get(MailConfiguration, 1))
+
+
+@app.put("/api/admin/smtp-settings")
+def update_admin_smtp_settings(payload: SmtpConfigurationInput, request: Request, _: str = Depends(require_admin)):
+    allowed_admin_origin(request)
+    with SessionLocal() as db:
+        row = db.get(MailConfiguration, 1)
+        if row is None:
+            row = MailConfiguration(
+                id=1, enabled=payload.enabled, smtp_host=payload.smtp_host, smtp_port=payload.smtp_port,
+                smtp_user=payload.smtp_user, smtp_from=str(payload.smtp_from),
+                notification_email=str(payload.notification_email), smtp_starttls=payload.smtp_starttls,
+            )
+            db.add(row)
+        else:
+            row.enabled = payload.enabled
+            row.smtp_host = payload.smtp_host
+            row.smtp_port = payload.smtp_port
+            row.smtp_user = payload.smtp_user
+            row.smtp_from = str(payload.smtp_from)
+            row.notification_email = str(payload.notification_email)
+            row.smtp_starttls = payload.smtp_starttls
+        if payload.smtp_password:
+            encrypted = smtp_cipher().encrypt(payload.smtp_password.encode("utf-8")).decode("ascii")
+            row.smtp_password_encrypted = encrypted
+        db.commit()
+        db.refresh(row)
+        return smtp_admin_dict(row)

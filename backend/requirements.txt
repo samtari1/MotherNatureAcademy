@@ -5,3 +5,4 @@ psycopg[binary]==3.2.3
 pydantic[email]==2.10.4
 pydantic-settings==2.7.0
 python-multipart==0.0.20
+cryptography==50.0.2

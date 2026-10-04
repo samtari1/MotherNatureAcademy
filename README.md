@@ -4,7 +4,7 @@ Next.js, FastAPI, and PostgreSQL website. The VPS deployment runs the app with s
 
 ## Run locally on macOS without Docker
 
-Run `./setup.sh` once from the project directory. It installs the Node and Python packages, prepares a local PostgreSQL database, and writes its credentials to the ignored `backend/.env` file. If PostgreSQL is missing and Homebrew is available, the script asks before installing PostgreSQL 16. It leaves SMTP disabled, so local form submissions are saved locally and do not send email.
+Run `./setup.sh` once from the project directory. It installs the Node and Python packages, prepares a local PostgreSQL database, and writes its credentials to the ignored `backend/.env` file. If PostgreSQL is missing and Homebrew is available, the script asks before installing PostgreSQL 16. It pre-fills the public GoDaddy SMTP server details but leaves the mailbox password blank, so SMTP is disabled by default. Settings later saved in the local admin are stored in the local database.
 
 Then run `./start.sh`. Open `http://localhost:3000` to use the website. The API health endpoint is `http://localhost:8000/health`; press Ctrl+C in the script's terminal to stop both services. Setup and start scripts are for macOS development only and do not update the VPS.
 
@@ -79,11 +79,11 @@ Replace `main` if the repository uses another default branch. View logs with `jo
 
 ## Email and inquiry handling
 
-The backend stores each inquiry before attempting email notification. Configure authenticated SMTP using provider-authorized values in `backend/.env`. If delivery fails, the inquiry remains in PostgreSQL.
+The backend stores each inquiry before attempting email notification. SMTP settings can be changed by a signed-in administrator under **Admin → Email**. Until an admin saves settings, the API reads the SMTP configuration from `backend/.env`. After saving, the SMTP host, port, username, sender, recipient, and STARTTLS choice are stored in PostgreSQL; a newly entered SMTP password is encrypted in the `mail_configuration` table. A blank password keeps the existing saved password, or falls back to `SMTP_PASSWORD` in `backend/.env` if none has been saved. Keep `SMTP_CONFIG_ENCRYPTION_KEY` in `backend/.env` private and backed up. Local setup and `updateServer.sh` create the key if it is missing. If delivery fails, the inquiry remains in PostgreSQL.
 
 ## Website admin
 
-Open `/admin` and sign in with the username and password configured for the admin account. The admin page can publish/edit/delete News posts and policy sections, upload and hide/delete campus photos, add/hide/delete YouTube videos, and update the school year, hours, campus location, tuition, and registration fee. Public pages read these values from the API. Uploaded media is saved in the ignored `media/` directory, so keep that directory in server backups.
+Open `/admin` and sign in with the username and password configured for the admin account. The admin page can publish/edit/delete News posts and policy sections, upload and hide/delete campus photos, add/hide/delete YouTube videos, and update the school year, hours, campus location, tuition, registration fee, public contact information, and SMTP settings. Public pages read these values from the API. Uploaded media is saved in the ignored `media/` directory, so keep that directory in server backups.
 
 The `/policies` page presents family-facing summaries seeded from the legacy handbook. Edit or unpublish sections in Admin → Policies; families can use Print / Save as PDF to produce a current copy. The old PDF is not copied to the public site because it contains superseded tuition and staff contact details.
 

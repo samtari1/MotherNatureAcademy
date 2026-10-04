@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { AdminDashboard } from "@/components/admin-dashboard";
+import { redirect } from "next/navigation";
 
 export const metadata: Metadata = {
   title: "Academy Admin",
@@ -7,5 +7,5 @@ export const metadata: Metadata = {
 };
 
 export default function AdminPage() {
-  return <main><AdminDashboard /></main>;
+  redirect("/admin/news");
 }

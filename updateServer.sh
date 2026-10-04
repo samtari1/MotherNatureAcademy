@@ -51,6 +51,14 @@ git ls-files -z | xargs -0r chmod u=rwX,go=rX
 log "Installing Python dependencies"
 backend/.venv/bin/pip install -r backend/requirements.txt
 
+if ! grep -q '^SMTP_CONFIG_ENCRYPTION_KEY=.' backend/.env; then
+  log "Creating the SMTP password encryption key"
+  SMTP_CONFIG_ENCRYPTION_KEY="$(backend/.venv/bin/python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
+  printf '\nSMTP_CONFIG_ENCRYPTION_KEY=%s\n' "$SMTP_CONFIG_ENCRYPTION_KEY" >> backend/.env
+  chmod 600 backend/.env
+  unset SMTP_CONFIG_ENCRYPTION_KEY
+fi
+
 log "Preparing uploaded-media directory"
 mkdir -p "$APP_DIR/media"
 API_USER="$(systemctl show mna-api.service -p User --value)"

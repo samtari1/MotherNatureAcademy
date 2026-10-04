@@ -96,13 +96,19 @@ set_local_env() {
 
 set_local_env DATABASE_URL "postgresql+psycopg://mna_local:${DB_PASSWORD}@localhost:5432/mna_local"
 set_local_env ALLOWED_ORIGINS "http://localhost:3000,http://127.0.0.1:3000"
-# Keep local submissions in the local database, but never send test data to a real mailbox.
-set_local_env SMTP_HOST ""
-set_local_env SMTP_USER ""
+# Keep local submissions in the local database; SMTP remains disabled because the password is blank.
+set_local_env SMTP_HOST "p3plzcpnl504528.prod.phx3.secureserver.net"
+set_local_env SMTP_USER "notification@mothernatureacademy.com"
 set_local_env SMTP_PASSWORD ""
-set_local_env SMTP_FROM ""
-set_local_env SMTP_PORT "587"
-set_local_env SMTP_STARTTLS "true"
+set_local_env SMTP_FROM "notification@mothernatureacademy.com"
+set_local_env NOTIFICATION_EMAIL "Laura@MotherNatureAcademy.com"
+set_local_env SMTP_PORT "465"
+set_local_env SMTP_STARTTLS "false"
+if ! grep -q '^SMTP_CONFIG_ENCRYPTION_KEY=.' backend/.env; then
+  SMTP_CONFIG_ENCRYPTION_KEY="$(backend/.venv/bin/python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
+  set_local_env SMTP_CONFIG_ENCRYPTION_KEY "$SMTP_CONFIG_ENCRYPTION_KEY"
+  unset SMTP_CONFIG_ENCRYPTION_KEY
+fi
 set_local_env ADMIN_COOKIE_SECURE "false"
 chmod 600 backend/.env
 unset DB_PASSWORD

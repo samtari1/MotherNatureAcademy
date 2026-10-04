@@ -1,6 +1,8 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { initialContactInfo, type ContactInfo } from "@/components/contact-details";
 
 const apiUrl = (path: string) => path;
 const mediaUrl = (url: string) => url;
@@ -11,8 +13,19 @@ type PolicySection = { id: number; title: string; body: string; published: boole
 type CalendarEvent = { id: number; calendar_id: number; title: string; start_date: string; end_date: string | null; description: string; sort_order: number };
 type AcademicCalendar = { id: number; school_year: string; title: string; notes: string; is_current: boolean; published: boolean; events: CalendarEvent[] };
 type SiteContent = { hours: string; campus_location: string; tuition_2_days: string; tuition_3_days: string; tuition_5_days: string; registration_fee: string; school_year: string };
+type SmtpSettings = { enabled: boolean; smtp_host: string; smtp_port: number; smtp_user: string; smtp_password: string; smtp_from: string; notification_email: string; smtp_starttls: boolean; smtp_password_set: boolean; encryption_key_configured: boolean };
+type AdminTab = "news" | "media" | "policies" | "calendar" | "details" | "email" | "contacts";
+
+const adminTabRoutes: Record<AdminTab, string> = { news: "news", media: "media", policies: "policies", calendar: "calendar", details: "hours", contacts: "contacts", email: "email" };
+function adminTabFromPath(pathname: string): AdminTab {
+  const section = pathname.split("/").filter(Boolean)[1];
+  if (section === "media" || section === "policies" || section === "calendar" || section === "contacts" || section === "email") return section;
+  if (section === "hours") return "details";
+  return "news";
+}
 
 const initialContent: SiteContent = { hours: "", campus_location: "", tuition_2_days: "", tuition_3_days: "", tuition_5_days: "", registration_fee: "", school_year: "" };
+const initialSmtp: SmtpSettings = { enabled: false, smtp_host: "", smtp_port: 587, smtp_user: "", smtp_password: "", smtp_from: "", notification_email: "", smtp_starttls: true, smtp_password_set: false, encryption_key_configured: false };
 
 async function request(path: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers);
@@ -24,21 +37,26 @@ async function request(path: string, init: RequestInit = {}) {
 }
 
 export function AdminDashboard() {
+  const pathname = usePathname();
+  const router = useRouter();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [signedIn, setSignedIn] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [tab, setTab] = useState<"news" | "media" | "policies" | "calendar" | "details">("news");
+  const [tab, setTab] = useState<AdminTab>(() => adminTabFromPath(pathname));
   const [news, setNews] = useState<News[]>([]);
   const [media, setMedia] = useState<Media[]>([]);
   const [content, setContent] = useState<SiteContent>(initialContent);
+  const [contactInfo, setContactInfo] = useState<ContactInfo>(initialContactInfo);
+  const [smtpSettings, setSmtpSettings] = useState<SmtpSettings>(initialSmtp);
   const [policies, setPolicies] = useState<PolicySection[]>([]);
   const [editingPolicyId, setEditingPolicyId] = useState<number | null>(null);
   const [creatingPolicy, setCreatingPolicy] = useState(false);
   const [policyForm, setPolicyForm] = useState({ title: "", body: "", published: false, sort_order: 0 });
   const [selectedMediaId, setSelectedMediaId] = useState<number | null>(null);
+  const mediaDialogRef = useRef<HTMLDialogElement | null>(null);
   const [mediaForm, setMediaForm] = useState({ title: "", caption: "", alt_text: "", url: "", published: true, sort_order: 0 });
   const [editingNews, setEditingNews] = useState<number | null>(null);
   const [newsForm, setNewsForm] = useState({ title: "", summary: "", body: "", published: false });
@@ -51,12 +69,14 @@ export function AdminDashboard() {
   const [eventForm, setEventForm] = useState({ title: "", start_date: "", end_date: "", description: "", sort_order: 0 });
 
   async function loadAdmin() {
-    const [posts, items, details, policySections, schoolCalendars] = await Promise.all([
-      request("/api/admin/news"), request("/api/admin/media"), request("/api/admin/site-content"), request("/api/admin/policies"), request("/api/admin/calendars"),
+    const [posts, items, details, policySections, schoolCalendars, mailSettings, contactDetails] = await Promise.all([
+      request("/api/admin/news"), request("/api/admin/media"), request("/api/admin/site-content"), request("/api/admin/policies"), request("/api/admin/calendars"), request("/api/admin/smtp-settings"), request("/api/admin/contact-info"),
     ]);
     setNews(posts);
     setMedia(items);
     setContent(details);
+    setContactInfo({ ...initialContactInfo, ...contactDetails });
+    setSmtpSettings({ ...mailSettings, smtp_password: "" });
     setPolicies(policySections);
     setCalendars(schoolCalendars);
     setSelectedCalendarId((current: number | null) => current && schoolCalendars.some((calendar: AcademicCalendar) => calendar.id === current) ? current : schoolCalendars.find((calendar: AcademicCalendar) => calendar.is_current)?.id ?? schoolCalendars[0]?.id ?? null);
@@ -65,6 +85,21 @@ export function AdminDashboard() {
   useEffect(() => {
     request("/api/admin/session").then(async () => { setSignedIn(true); await loadAdmin(); }).catch(() => {}).finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => { setTab(adminTabFromPath(pathname)); }, [pathname]);
+
+  function navigateTab(nextTab: AdminTab) {
+    setTab(nextTab);
+    const target = `/admin/${adminTabRoutes[nextTab]}`;
+    if (pathname !== target) router.push(target);
+  }
+
+  useEffect(() => {
+    const dialog = mediaDialogRef.current;
+    if (!dialog) return;
+    if (selectedMediaId !== null && !dialog.open) dialog.showModal();
+    if (selectedMediaId === null && dialog.open) dialog.close();
+  }, [selectedMediaId]);
 
   async function signIn(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setError(""); setNotice("");
@@ -145,6 +180,24 @@ export function AdminDashboard() {
     event.preventDefault(); setError(""); setNotice("");
     try { const saved = await request("/api/admin/site-content", { method: "PUT", body: JSON.stringify(content) }); setContent(saved); setNotice("Site details updated."); }
     catch (err) { setError(err instanceof Error ? err.message : "Could not update site details."); }
+  }
+
+  async function saveSmtpSettings(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setError(""); setNotice("");
+    try {
+      const saved = await request("/api/admin/smtp-settings", { method: "PUT", body: JSON.stringify(smtpSettings) });
+      setSmtpSettings({ ...saved, smtp_password: "" });
+      setNotice("Email settings saved. Inquiry and registration notifications use these settings.");
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not save email settings."); }
+  }
+
+  async function saveContactInfo(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setError(""); setNotice("");
+    try {
+      const saved = await request("/api/admin/contact-info", { method: "PUT", body: JSON.stringify(contactInfo) });
+      setContactInfo({ ...initialContactInfo, ...saved });
+      setNotice("Contact information saved. Public contact details update as visitors load the site.");
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not save contact information."); }
   }
 
   function editPolicy(section: PolicySection) {
@@ -237,7 +290,7 @@ export function AdminDashboard() {
   return <section className="admin-shell"><div className="admin-panel">
     <div className="admin-heading"><div><span className="eyebrow"><span/> WEBSITE CONTENT</span><h1>Academy admin</h1><p>Updates publish to the public website as soon as you save them.</p></div><button className="admin-secondary" onClick={signOut}>Sign out</button></div>
     {error && <p className="form-error" role="alert">{error}</p>}{notice && <p className="form-success" role="status">{notice}</p>}
-    <div className="admin-tabs" role="tablist"><button className={tab === "news" ? "active" : ""} onClick={() => setTab("news")}>News</button><button className={tab === "media" ? "active" : ""} onClick={() => setTab("media")}>Photos & videos</button><button className={tab === "policies" ? "active" : ""} onClick={() => setTab("policies")}>Policies</button><button className={tab === "calendar" ? "active" : ""} onClick={() => setTab("calendar")}>Calendar</button><button className={tab === "details" ? "active" : ""} onClick={() => setTab("details")}>Hours & tuition</button></div>
+    <nav className="admin-tabs" aria-label="Admin sections"><button type="button" className={tab === "news" ? "active" : ""} aria-current={tab === "news" ? "page" : undefined} onClick={() => navigateTab("news")}>News</button><button type="button" className={tab === "media" ? "active" : ""} aria-current={tab === "media" ? "page" : undefined} onClick={() => navigateTab("media")}>Photos & videos</button><button type="button" className={tab === "policies" ? "active" : ""} aria-current={tab === "policies" ? "page" : undefined} onClick={() => navigateTab("policies")}>Policies</button><button type="button" className={tab === "calendar" ? "active" : ""} aria-current={tab === "calendar" ? "page" : undefined} onClick={() => navigateTab("calendar")}>Calendar</button><button type="button" className={tab === "details" ? "active" : ""} aria-current={tab === "details" ? "page" : undefined} onClick={() => navigateTab("details")}>Hours & tuition</button><button type="button" className={tab === "contacts" ? "active" : ""} aria-current={tab === "contacts" ? "page" : undefined} onClick={() => navigateTab("contacts")}>Contacts</button><button type="button" className={tab === "email" ? "active" : ""} aria-current={tab === "email" ? "page" : undefined} onClick={() => navigateTab("email")}>Email</button></nav>
 
     {tab === "news" && <div className="admin-content-grid"><div><h2>{editingNews ? "Edit news post" : "Write a news post"}</h2><form className="admin-form" onSubmit={saveNews}>
       <label>Title<input value={newsForm.title} onChange={e => setNewsForm({ ...newsForm, title: e.target.value })} maxLength={180} required /></label>
@@ -251,21 +304,25 @@ export function AdminDashboard() {
       <label>Image file<input type="file" name="file" accept="image/jpeg,image/png,image/webp" required /></label><label>Title<input name="title" maxLength={180} required /></label><label>Caption<input name="caption" maxLength={500} /></label><label>Alternative text<input name="alt_text" maxLength={300} required /></label><button className="button">Upload photo</button>
     </form><h2 className="admin-subhead">Add a YouTube video</h2><form className="admin-form" onSubmit={addVideo}><label>Title<input name="title" required maxLength={180} /></label><label>Video link<input name="url" type="url" placeholder="https://youtu.be/…" required /></label><label>Caption<input name="caption" maxLength={500} /></label><label>Display order<input name="sort_order" type="number" defaultValue="0" min="0" max="10000" /></label><button className="button">Add video</button></form></div>
       <div><h2>Website media</h2><p>Select a photo or video to preview and edit its details.</p>
-        {selectedMediaId !== null && (() => { const selected = media.find(item => item.id === selectedMediaId); if (!selected) return null; return <div className="media-editor">
-          <div className="media-preview">{selected.kind === "photo" ? <img src={mediaUrl(selected.url)} alt={mediaForm.alt_text || selected.title} /> : <iframe src={selected.url} title={mediaForm.title || selected.title} allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerPolicy="strict-origin-when-cross-origin" allowFullScreen />}</div>
+        <div className="admin-media-list-scroll" role="region" aria-label="Website media list" tabIndex={0}><div className="admin-list">{media.map(item => <article className={selectedMediaId === item.id ? "selected" : ""} key={item.id}><button type="button" className="admin-media-select" onClick={() => editMedia(item)}><span className="admin-media-row">{item.kind === "photo" ? <img src={mediaUrl(item.url)} alt=""/> : <span className="admin-video-icon">▶</span>}<span><strong>{item.title}</strong><small>{item.kind} · {item.published ? "Visible on site" : "Hidden"}</small><small>{item.caption}</small></span></span></button><div className="admin-actions"><button type="button" className="admin-secondary" onClick={() => toggleMedia(item)}>{item.published ? "Hide" : "Publish"}</button><button type="button" className="admin-danger" onClick={() => removeMedia(item)}>Delete</button></div></article>)}</div></div>
+      </div></div>}
+
+    <dialog className="media-editor-dialog" ref={mediaDialogRef} onClose={() => setSelectedMediaId(null)}>
+      {selectedMediaId !== null && (() => { const selected = media.find(item => item.id === selectedMediaId); if (!selected) return null; return <div className="media-editor">
+        <div className="media-editor-heading"><div><span className="eyebrow"><span/> EDIT WEBSITE MEDIA</span><h2>{selected.title}</h2></div><button type="button" className="admin-secondary" onClick={() => setSelectedMediaId(null)}>Close</button></div>
+        <div className="media-editor-body"><div className="media-preview">{selected.kind === "photo" ? <img src={mediaUrl(selected.url)} alt={mediaForm.alt_text || selected.title} /> : <iframe src={selected.url} title={mediaForm.title || selected.title} allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerPolicy="strict-origin-when-cross-origin" allowFullScreen />}</div>
           <form className="admin-form" onSubmit={saveMedia}>
-            <h3>Edit {selected.kind}</h3>
             <label>Title<input value={mediaForm.title} onChange={event => setMediaForm({ ...mediaForm, title: event.target.value })} required maxLength={180} /></label>
             {selected.kind === "video" && <label>YouTube video link<input type="url" value={mediaForm.url} onChange={event => setMediaForm({ ...mediaForm, url: event.target.value })} required maxLength={500} /></label>}
             <label>Caption<textarea rows={3} value={mediaForm.caption} onChange={event => setMediaForm({ ...mediaForm, caption: event.target.value })} maxLength={500} /></label>
             {selected.kind === "photo" && <label>Alternative text<input value={mediaForm.alt_text} onChange={event => setMediaForm({ ...mediaForm, alt_text: event.target.value })} maxLength={300} /></label>}
             <label>Display order<input type="number" min="0" max="10000" value={mediaForm.sort_order} onChange={event => setMediaForm({ ...mediaForm, sort_order: Number(event.target.value) })} /></label>
             <label className="admin-check"><input type="checkbox" checked={mediaForm.published} onChange={event => setMediaForm({ ...mediaForm, published: event.target.checked })} /> Visible on website</label>
-            <div className="admin-actions"><button className="button">Save changes</button><button type="button" className="admin-secondary" onClick={() => setSelectedMediaId(null)}>Close</button></div>
+            <div className="admin-actions"><button className="button">Save changes</button></div>
           </form>
-        </div>; })()}
-        <div className="admin-list">{media.map(item => <article className={selectedMediaId === item.id ? "selected" : ""} key={item.id}><button type="button" className="admin-media-select" onClick={() => editMedia(item)}><span className="admin-media-row">{item.kind === "photo" ? <img src={mediaUrl(item.url)} alt=""/> : <span className="admin-video-icon">▶</span>}<span><strong>{item.title}</strong><small>{item.kind} · {item.published ? "Visible on site" : "Hidden"}</small><small>{item.caption}</small></span></span></button><div className="admin-actions"><button type="button" className="admin-secondary" onClick={() => toggleMedia(item)}>{item.published ? "Hide" : "Publish"}</button><button type="button" className="admin-danger" onClick={() => removeMedia(item)}>Delete</button></div></article>)}</div>
-      </div></div>}
+        </div>
+      </div>; })()}
+    </dialog>
 
     {tab === "policies" && <div className="admin-content-grid policy-admin"><div>
       <div className="admin-policy-heading"><div><h2>{creatingPolicy ? "Add a policy section" : editingPolicyId ? "Edit policy section" : "Select a section"}</h2><p>Plain text is shown on the public Policies page. Review family-facing instructions before publishing.</p></div><button type="button" className="admin-secondary" onClick={() => { setCreatingPolicy(true); setEditingPolicyId(null); setPolicyForm({ title: "", body: "", published: false, sort_order: policies.length * 10 + 10 }); }}>Add section</button></div>
@@ -310,5 +367,35 @@ export function AdminDashboard() {
       <div className="admin-rate-grid"><label>2-day tuition<input value={content.tuition_2_days} onChange={e => setContent({ ...content, tuition_2_days: e.target.value })} required /></label><label>3-day tuition<input value={content.tuition_3_days} onChange={e => setContent({ ...content, tuition_3_days: e.target.value })} required /></label><label>5-day tuition<input value={content.tuition_5_days} onChange={e => setContent({ ...content, tuition_5_days: e.target.value })} required /></label><label>Registration fee<input value={content.registration_fee} onChange={e => setContent({ ...content, registration_fee: e.target.value })} required /></label></div>
       <button className="button">Save site details</button>
     </form></div><aside><strong>Content goes live when saved.</strong><p>Please confirm tuition, fees, enrollment dates, and availability before publishing changes. Registration applications are stored separately from website content.</p></aside></div>}
+
+    {tab === "email" && <div className="admin-details"><div><h2>SMTP email settings</h2><p>These settings send website inquiries and registration applications to the notification address.</p><form className="admin-form" onSubmit={saveSmtpSettings}>
+      <label className="admin-check"><input type="checkbox" checked={smtpSettings.enabled} onChange={e => setSmtpSettings({ ...smtpSettings, enabled: e.target.checked })} /> Send website email notifications</label>
+      <label>SMTP server<input value={smtpSettings.smtp_host} onChange={e => setSmtpSettings({ ...smtpSettings, smtp_host: e.target.value })} autoComplete="url" required maxLength={255} /></label>
+      <div className="admin-rate-grid"><label>SMTP port<input type="number" value={smtpSettings.smtp_port} onChange={e => setSmtpSettings({ ...smtpSettings, smtp_port: Number(e.target.value) })} min="1" max="65535" required /></label><label>SMTP username<input value={smtpSettings.smtp_user} onChange={e => setSmtpSettings({ ...smtpSettings, smtp_user: e.target.value })} autoComplete="username" required maxLength={254} /></label></div>
+      <label>SMTP password<input type="password" value={smtpSettings.smtp_password} onChange={e => setSmtpSettings({ ...smtpSettings, smtp_password: e.target.value })} autoComplete="new-password" placeholder={smtpSettings.smtp_password_set ? "********" : "Enter the mailbox password"} /></label>
+      <p className="smtp-password-status">{smtpSettings.smtp_password_set ? "Password saved. Leave this field blank to keep it, or enter a new password to replace it." : "No SMTP password is configured yet."}</p>
+      <label>From address<input type="email" value={smtpSettings.smtp_from} onChange={e => setSmtpSettings({ ...smtpSettings, smtp_from: e.target.value })} autoComplete="email" required maxLength={254} /></label>
+      <label>Notification recipient<input type="email" value={smtpSettings.notification_email} onChange={e => setSmtpSettings({ ...smtpSettings, notification_email: e.target.value })} autoComplete="email" required maxLength={254} /></label>
+      <label className="admin-check"><input type="checkbox" checked={smtpSettings.smtp_starttls} onChange={e => setSmtpSettings({ ...smtpSettings, smtp_starttls: e.target.checked })} /> Use STARTTLS (usually port 587)</label>
+      <p className="smtp-password-status">Port 465 uses implicit SSL/TLS automatically. Leave STARTTLS off for port 465. Your SMTP password is encrypted before it is stored and is never displayed here.</p>
+      {!smtpSettings.encryption_key_configured && <p className="form-error">The server still needs SMTP_CONFIG_ENCRYPTION_KEY in backend/.env before a new password can be saved. Existing environment-based mail settings will continue to work.</p>}
+      <button className="button">Save email settings</button>
+    </form></div><aside><strong>Mailbox setup</strong><p>Use the SMTP server, port, username, and password provided by your email host. “From address” should generally be the authenticated mailbox; the notification recipient can be a different address. Saving these settings applies to both family inquiries and registration applications.</p></aside></div>}
+
+    {tab === "contacts" && <div className="admin-details"><div><h2>Contact details</h2><p>These details appear on the Contact page, site footer, registration page, and saved-application follow-up message.</p><form className="admin-form" onSubmit={saveContactInfo}>
+      <label>Business name<input value={contactInfo.business_name} onChange={e => setContactInfo({ ...contactInfo, business_name: e.target.value })} required maxLength={180} /></label>
+      <h3 className="admin-subhead">Physical address</h3>
+      <label>Street address<input value={contactInfo.physical_street} onChange={e => setContactInfo({ ...contactInfo, physical_street: e.target.value })} required maxLength={200} /></label>
+      <div className="admin-rate-grid"><label>City<input value={contactInfo.physical_city} onChange={e => setContactInfo({ ...contactInfo, physical_city: e.target.value })} required maxLength={100} /></label><label>State<input value={contactInfo.physical_state} onChange={e => setContactInfo({ ...contactInfo, physical_state: e.target.value })} required maxLength={80} /></label><label>Postal code<input value={contactInfo.physical_postal_code} onChange={e => setContactInfo({ ...contactInfo, physical_postal_code: e.target.value })} required maxLength={20} /></label></div>
+      <h3 className="admin-subhead">Mailing address</h3>
+      <label>Street or PO box<input value={contactInfo.mailing_street} onChange={e => setContactInfo({ ...contactInfo, mailing_street: e.target.value })} required maxLength={200} /></label>
+      <div className="admin-rate-grid"><label>City<input value={contactInfo.mailing_city} onChange={e => setContactInfo({ ...contactInfo, mailing_city: e.target.value })} required maxLength={100} /></label><label>State<input value={contactInfo.mailing_state} onChange={e => setContactInfo({ ...contactInfo, mailing_state: e.target.value })} required maxLength={80} /></label><label>Postal code<input value={contactInfo.mailing_postal_code} onChange={e => setContactInfo({ ...contactInfo, mailing_postal_code: e.target.value })} required maxLength={20} /></label></div>
+      {[1, 2].map(index => <div className="admin-contact-educator" key={index}><h3 className="admin-subhead">Educator {index}</h3>
+        <label>Full name<input value={contactInfo[`educator_${index}_name` as keyof ContactInfo] as string} onChange={e => setContactInfo({ ...contactInfo, [`educator_${index}_name`]: e.target.value })} required maxLength={120} /></label>
+        <div className="admin-rate-grid"><label>Title or name used on site<input value={contactInfo[`educator_${index}_title` as keyof ContactInfo] as string} onChange={e => setContactInfo({ ...contactInfo, [`educator_${index}_title`]: e.target.value })} maxLength={80} /></label><label>Phone<input type="tel" value={contactInfo[`educator_${index}_phone` as keyof ContactInfo] as string} onChange={e => setContactInfo({ ...contactInfo, [`educator_${index}_phone`]: e.target.value })} required maxLength={40} /></label></div>
+        <label>Email<input type="email" value={contactInfo[`educator_${index}_email` as keyof ContactInfo] as string} onChange={e => setContactInfo({ ...contactInfo, [`educator_${index}_email`]: e.target.value })} required maxLength={254} /></label>
+      </div>)}
+      <button className="button">Save contact details</button>
+    </form></div><aside><strong>One place to update the public contacts.</strong><p>Changes update the site-wide footer and the contact and registration pages. A new email address here updates public contact links and follow-up instructions; the SMTP sender and recipient remain separately controlled in the Email tab.</p></aside></div>}
   </div></section>;
 }
