@@ -7,7 +7,7 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-const sections = new Set(["news", "media", "policies", "calendar", "hours", "contacts", "email"]);
+const sections = new Set(["news", "media", "policies", "calendar", "hours", "contacts", "email", "applications"]);
 
 export default function AdminSectionPage({ params }: { params: { section: string } }) {
   if (!sections.has(params.section)) notFound();

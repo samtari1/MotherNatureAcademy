@@ -14,18 +14,21 @@ type CalendarEvent = { id: number; calendar_id: number; title: string; start_dat
 type AcademicCalendar = { id: number; school_year: string; title: string; notes: string; is_current: boolean; published: boolean; events: CalendarEvent[] };
 type SiteContent = { hours: string; campus_location: string; tuition_2_days: string; tuition_3_days: string; tuition_5_days: string; registration_fee: string; school_year: string };
 type SmtpSettings = { enabled: boolean; smtp_host: string; smtp_port: number; smtp_user: string; smtp_password: string; smtp_from: string; notification_email: string; smtp_starttls: boolean; smtp_password_set: boolean; encryption_key_configured: boolean };
-type AdminTab = "news" | "media" | "policies" | "calendar" | "details" | "email" | "contacts";
+type RegistrationSummary = { id: number; school_year: string; child_name: string; guardian_name: string; created_at: string; notification_sent: boolean };
+type RegistrationDetail = RegistrationSummary & { guardian_email: string; child_nickname: string | null; child_age: string; child_date_of_birth: string; lives_with: string; schedule: string; guardian_relationship: string; address: string; city: string; state: string; postal_code: string; home_phone: string | null; cell_phone: string; work_phone: string | null; second_guardian_name: string | null; second_guardian_relationship: string | null; second_guardian_phone: string | null; second_guardian_email: string | null; signature: string; notification_sent_at: string | null };
+type AdminTab = "news" | "media" | "policies" | "calendar" | "details" | "email" | "contacts" | "applications";
 
-const adminTabRoutes: Record<AdminTab, string> = { news: "news", media: "media", policies: "policies", calendar: "calendar", details: "hours", contacts: "contacts", email: "email" };
+const adminTabRoutes: Record<AdminTab, string> = { news: "news", media: "media", policies: "policies", calendar: "calendar", details: "hours", contacts: "contacts", email: "email", applications: "applications" };
 function adminTabFromPath(pathname: string): AdminTab {
   const section = pathname.split("/").filter(Boolean)[1];
-  if (section === "media" || section === "policies" || section === "calendar" || section === "contacts" || section === "email") return section;
+  if (section === "media" || section === "policies" || section === "calendar" || section === "contacts" || section === "email" || section === "applications") return section;
   if (section === "hours") return "details";
   return "news";
 }
 
 const initialContent: SiteContent = { hours: "", campus_location: "", tuition_2_days: "", tuition_3_days: "", tuition_5_days: "", registration_fee: "", school_year: "" };
 const initialSmtp: SmtpSettings = { enabled: false, smtp_host: "", smtp_port: 587, smtp_user: "", smtp_password: "", smtp_from: "", notification_email: "", smtp_starttls: true, smtp_password_set: false, encryption_key_configured: false };
+const easternDateTime = (value: string) => new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" }).format(new Date(value));
 
 async function request(path: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers);
@@ -34,6 +37,10 @@ async function request(path: string, init: RequestInit = {}) {
   const result = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(result.detail || "The request could not be completed.");
   return result;
+}
+
+function ApplicationSection({ title, rows }: { title: string; rows: [string, string | null | undefined][] }) {
+  return <section className="application-detail-section"><h4>{title}</h4><dl>{rows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value || "Not provided"}</dd></div>)}</dl></section>;
 }
 
 export function AdminDashboard() {
@@ -47,6 +54,9 @@ export function AdminDashboard() {
   const [notice, setNotice] = useState("");
   const [tab, setTab] = useState<AdminTab>(() => adminTabFromPath(pathname));
   const [news, setNews] = useState<News[]>([]);
+  const [registrations, setRegistrations] = useState<RegistrationSummary[]>([]);
+  const [selectedRegistration, setSelectedRegistration] = useState<RegistrationDetail | null>(null);
+  const [loadingRegistration, setLoadingRegistration] = useState(false);
   const [media, setMedia] = useState<Media[]>([]);
   const [content, setContent] = useState<SiteContent>(initialContent);
   const [contactInfo, setContactInfo] = useState<ContactInfo>(initialContactInfo);
@@ -69,10 +79,11 @@ export function AdminDashboard() {
   const [eventForm, setEventForm] = useState({ title: "", start_date: "", end_date: "", description: "", sort_order: 0 });
 
   async function loadAdmin() {
-    const [posts, items, details, policySections, schoolCalendars, mailSettings, contactDetails] = await Promise.all([
-      request("/api/admin/news"), request("/api/admin/media"), request("/api/admin/site-content"), request("/api/admin/policies"), request("/api/admin/calendars"), request("/api/admin/smtp-settings"), request("/api/admin/contact-info"),
+    const [posts, items, details, policySections, schoolCalendars, mailSettings, contactDetails, applications] = await Promise.all([
+      request("/api/admin/news"), request("/api/admin/media"), request("/api/admin/site-content"), request("/api/admin/policies"), request("/api/admin/calendars"), request("/api/admin/smtp-settings"), request("/api/admin/contact-info"), request("/api/admin/registrations"),
     ]);
     setNews(posts);
+    setRegistrations(applications);
     setMedia(items);
     setContent(details);
     setContactInfo({ ...initialContactInfo, ...contactDetails });
@@ -111,7 +122,19 @@ export function AdminDashboard() {
 
   async function signOut() {
     try { await request("/api/admin/logout", { method: "POST" }); } catch {}
-    setSignedIn(false); setNews([]); setMedia([]); setNotice("You are signed out.");
+    setSignedIn(false); setNews([]); setMedia([]); setRegistrations([]); setSelectedRegistration(null); setNotice("You are signed out.");
+  }
+
+  async function openRegistration(id: number) {
+    setLoadingRegistration(true); setError(""); setSelectedRegistration(null);
+    try { setSelectedRegistration(await request(`/api/admin/registrations/${id}`)); }
+    catch (err) { setError(err instanceof Error ? err.message : "Could not load the application."); }
+    finally { setLoadingRegistration(false); }
+  }
+
+  async function refreshRegistrations() {
+    try { setRegistrations(await request("/api/admin/registrations")); setNotice("Applications refreshed."); }
+    catch (err) { setError(err instanceof Error ? err.message : "Could not refresh applications."); }
   }
 
   async function saveNews(event: FormEvent<HTMLFormElement>) {
@@ -290,7 +313,27 @@ export function AdminDashboard() {
   return <section className="admin-shell"><div className="admin-panel">
     <div className="admin-heading"><div><span className="eyebrow"><span/> WEBSITE CONTENT</span><h1>Academy admin</h1><p>Updates publish to the public website as soon as you save them.</p></div><button className="admin-secondary" onClick={signOut}>Sign out</button></div>
     {error && <p className="form-error" role="alert">{error}</p>}{notice && <p className="form-success" role="status">{notice}</p>}
-    <nav className="admin-tabs" aria-label="Admin sections"><button type="button" className={tab === "news" ? "active" : ""} aria-current={tab === "news" ? "page" : undefined} onClick={() => navigateTab("news")}>News</button><button type="button" className={tab === "media" ? "active" : ""} aria-current={tab === "media" ? "page" : undefined} onClick={() => navigateTab("media")}>Photos & videos</button><button type="button" className={tab === "policies" ? "active" : ""} aria-current={tab === "policies" ? "page" : undefined} onClick={() => navigateTab("policies")}>Policies</button><button type="button" className={tab === "calendar" ? "active" : ""} aria-current={tab === "calendar" ? "page" : undefined} onClick={() => navigateTab("calendar")}>Calendar</button><button type="button" className={tab === "details" ? "active" : ""} aria-current={tab === "details" ? "page" : undefined} onClick={() => navigateTab("details")}>Hours & tuition</button><button type="button" className={tab === "contacts" ? "active" : ""} aria-current={tab === "contacts" ? "page" : undefined} onClick={() => navigateTab("contacts")}>Contacts</button><button type="button" className={tab === "email" ? "active" : ""} aria-current={tab === "email" ? "page" : undefined} onClick={() => navigateTab("email")}>Email</button></nav>
+    <nav className="admin-tabs" aria-label="Admin sections"><button type="button" className={tab === "news" ? "active" : ""} aria-current={tab === "news" ? "page" : undefined} onClick={() => navigateTab("news")}>News</button><button type="button" className={tab === "media" ? "active" : ""} aria-current={tab === "media" ? "page" : undefined} onClick={() => navigateTab("media")}>Photos & videos</button><button type="button" className={tab === "policies" ? "active" : ""} aria-current={tab === "policies" ? "page" : undefined} onClick={() => navigateTab("policies")}>Policies</button><button type="button" className={tab === "calendar" ? "active" : ""} aria-current={tab === "calendar" ? "page" : undefined} onClick={() => navigateTab("calendar")}>Calendar</button><button type="button" className={tab === "details" ? "active" : ""} aria-current={tab === "details" ? "page" : undefined} onClick={() => navigateTab("details")}>Hours & tuition</button><button type="button" className={tab === "contacts" ? "active" : ""} aria-current={tab === "contacts" ? "page" : undefined} onClick={() => navigateTab("contacts")}>Contacts</button><button type="button" className={tab === "applications" ? "active" : ""} aria-current={tab === "applications" ? "page" : undefined} onClick={() => navigateTab("applications")}>Applications</button><button type="button" className={tab === "email" ? "active" : ""} aria-current={tab === "email" ? "page" : undefined} onClick={() => navigateTab("email")}>Email</button></nav>
+
+    {tab === "applications" && <div className="applications-admin">
+      <div className="admin-policy-heading"><div><h2>Registration applications</h2><p>Private family information is visible only to signed-in administrators. Showing the 200 most recent applications.</p></div><button type="button" className="admin-secondary" onClick={refreshRegistrations}>Refresh</button></div>
+      <div className="applications-admin-grid"><div className="applications-list" aria-label="Registration applications">
+        {registrations.length === 0 ? <p>No applications have been submitted yet.</p> : registrations.map(application => <button type="button" className={`application-select${selectedRegistration?.id === application.id ? " selected" : ""}`} key={application.id} onClick={() => openRegistration(application.id)}>
+          <strong>{application.child_name}</strong><span>{application.guardian_name} · {application.school_year}</span><small>{easternDateTime(application.created_at)} · Email {application.notification_sent ? "sent" : "not sent"}</small>
+        </button>)}
+      </div>
+      <div className="application-detail" aria-live="polite">
+        {loadingRegistration && <p>Loading application…</p>}
+        {!loadingRegistration && !selectedRegistration && <p>Select an application to view its details.</p>}
+        {selectedRegistration && <>
+          <div className="application-detail-heading"><div><span className="eyebrow"><span/> APPLICATION #{selectedRegistration.id}</span><h3>{selectedRegistration.child_name}</h3><p>School year {selectedRegistration.school_year} · Submitted {easternDateTime(selectedRegistration.created_at)}</p></div><button type="button" className="admin-secondary" onClick={() => setSelectedRegistration(null)}>Close</button></div>
+          <ApplicationSection title="Child & schedule" rows={[["Nickname", selectedRegistration.child_nickname], ["Age", selectedRegistration.child_age], ["Date of birth", selectedRegistration.child_date_of_birth], ["Lives with", selectedRegistration.lives_with], ["Schedule", selectedRegistration.schedule.replaceAll("_", " ")]]} />
+          <ApplicationSection title="Responsible party" rows={[["Name", selectedRegistration.guardian_name], ["Relationship", selectedRegistration.guardian_relationship], ["Address", `${selectedRegistration.address}, ${selectedRegistration.city}, ${selectedRegistration.state} ${selectedRegistration.postal_code}`], ["Cell phone", selectedRegistration.cell_phone], ["Home phone", selectedRegistration.home_phone], ["Work phone", selectedRegistration.work_phone], ["Email", selectedRegistration.guardian_email]]} />
+          <ApplicationSection title="Second responsible party" rows={[["Name", selectedRegistration.second_guardian_name], ["Relationship", selectedRegistration.second_guardian_relationship], ["Phone", selectedRegistration.second_guardian_phone], ["Email", selectedRegistration.second_guardian_email]]} />
+          <ApplicationSection title="Submission" rows={[["Typed signature", selectedRegistration.signature], ["Email notification", selectedRegistration.notification_sent_at ? `Sent ${easternDateTime(selectedRegistration.notification_sent_at)}` : "Not sent or not recorded"]]} />
+        </>}
+      </div></div>
+    </div>}
 
     {tab === "news" && <div className="admin-content-grid"><div><h2>{editingNews ? "Edit news post" : "Write a news post"}</h2><form className="admin-form" onSubmit={saveNews}>
       <label>Title<input value={newsForm.title} onChange={e => setNewsForm({ ...newsForm, title: e.target.value })} maxLength={180} required /></label>

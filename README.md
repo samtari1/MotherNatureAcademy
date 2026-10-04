@@ -14,32 +14,41 @@ Apache stays on ports 80 and 443. Next.js listens on `127.0.0.1:3000`, FastAPI o
 
 ### Clone and prepare
 
-SSH to the server, install Git, Node.js, Python, PostgreSQL, and Apache, then:
+These instructions describe the current no-Docker deployment on Ubuntu 24.04. The deployment script uses the fixed path `/var/www/mothernatureacademy`; keep that path or update `APP_DIR` in `updateServer.sh` before using a different one. Install Git, Node.js 20 or later, Python 3.12, PostgreSQL, Apache, and `python3-venv`. The deployment script must run as root, so open a root shell before cloning and preparing the checkout:
 
 ```sh
-sudo mkdir -p /opt/mothernatureacademy
-sudo chown "$USER":"$USER" /opt/mothernatureacademy
-git clone https://github.com/samtari1/MotherNatureAcademy.git /opt/mothernatureacademy
-cd /opt/mothernatureacademy
+sudo -i
+git clone https://github.com/samtari1/MotherNatureAcademy.git /var/www/mothernatureacademy
+cd /var/www/mothernatureacademy
 ```
 
-For a private repo, set up SSH authentication on the VPS. Do not put a GitHub token in the URL.
+If the repository is private, configure GitHub SSH authentication for root, which will run `git pull`; never put a GitHub token in the URL. If the checkout was created by another account, configure root's Git safe-directory once with `git config --global --add safe.directory /var/www/mothernatureacademy`.
 
-Create the private root environment file:
+Create a dedicated local PostgreSQL role and database. Generate a password with letters and digits only (for example, run `openssl rand -hex 32` and keep the output private), and use the same value for the role password and `DATABASE_URL` below. Open PostgreSQL as its administrative account:
 
 ```sh
-printf 'POSTGRES_PASSWORD=%s\nNEXT_PUBLIC_API_URL=/\n' "$(openssl rand -hex 32)" > .env
-chmod 600 .env
+sudo -u postgres psql
 ```
 
-Create the backend environment file:
+At the `postgres=#` prompt, create the role, securely set its password with `\password` (enter the generated password twice), create the database, then exit with `\q`:
+
+```sql
+CREATE ROLE mna_user WITH LOGIN;
+\password mna_user
+CREATE DATABASE mna OWNER mna_user;
+```
+
+Do not expose PostgreSQL port 5432 to the Internet. The app connects over localhost; the `db` hostname is only used by the optional Docker Compose configuration. The root `.env` and `POSTGRES_PASSWORD` are for Docker Compose and are not required for this systemd deployment.
+
+Create a private backend environment file and Python virtual environment:
 
 ```sh
 cp backend/.env.example backend/.env
 chmod 600 backend/.env
+python3 -m venv backend/.venv
 ```
 
-Edit `backend/.env` with a secure editor. Set `DATABASE_URL` to `postgresql+psycopg://mna_user:YOUR_SAME_POSTGRES_PASSWORD@db:5432/mna`, set `ALLOWED_ORIGINS` to the production HTTPS origins, and enter the SMTP host, user, password, and authorized sender issued by the email provider. Never commit these secret files.
+Edit `backend/.env` with a secure editor. Set `DATABASE_URL` to `postgresql+psycopg://mna_user:YOUR_SAME_POSTGRES_PASSWORD@127.0.0.1:5432/mna`, `ALLOWED_ORIGINS` to the exact public HTTPS origins, and enter SMTP details supplied by the email provider. Set `ADMIN_COOKIE_SECURE=true` on the HTTPS VPS. Keep `SMTP_CONFIG_ENCRYPTION_KEY` stable and private; it encrypts SMTP passwords saved through the admin. Generate a Fernet key with the command in `backend/.env.example` or let `updateServer.sh` create it on its first run. Never commit `backend/.env` or share it in support messages. GoDaddy email uses its own mail host and DNS records; changing the website A records does not require changing MX, SPF, DKIM, or DMARC records.
 
 ### Build and start the applications
 
@@ -47,17 +56,19 @@ Edit `backend/.env` with a secure editor. Set `DATABASE_URL` to `postgresql+psyc
 ./backend/.venv/bin/pip install -r backend/requirements.txt
 npm ci
 NEXT_PUBLIC_API_URL=/ npm run build
-sudo systemctl restart mna-api mna-web
-sudo systemctl status mna-api mna-web --no-pager
+systemctl restart mna-api mna-web
+systemctl status mna-api mna-web --no-pager
 curl -fsS http://127.0.0.1:3000/ >/dev/null
 curl -fsS http://127.0.0.1:8000/health
 ```
 
-Do not open port 5432 to the Internet. PostgreSQL should accept local connections only.
+The first `systemctl` commands work only after the `mna-api` and `mna-web` systemd unit files have been installed and configured to run the API and Next.js on `127.0.0.1:8000` and `127.0.0.1:3000`. These host-level unit files are not stored in this Git repository. Before replacing or rebuilding a working VPS, save their definitions with `systemctl cat mna-api mna-web` and keep them in a secure server-setup record. Ensure the API service user can read the application and `backend/.env`, and can write to the `media/` directory; `updateServer.sh` sets the media directory's owner based on the API service. Keep both app ports private behind Apache.
+
+The API creates missing database tables and starter content on first start. SQLAlchemy `create_all` does not update existing table definitions, so back up the database before deploying changes that modify database models and apply any required schema migration before updating the app.
 
 ### Configure Apache and HTTPS
 
-Enable `proxy`, `proxy_http`, `proxy_wstunnel`, `rewrite`, `headers`, and `ssl` modules using the commands for your distribution. Obtain a TLS certificate for the site with your existing certificate manager. Copy `deploy/apache-mothernatureacademy.conf` into the Apache virtual-host directory, verify certificate paths, enable the site, run `apachectl configtest`, and reload Apache. The supplied example redirects HTTP to HTTPS and sends `/api/` and `/health` to FastAPI, other paths to Next.js.
+Point the domain's A records to the VPS and allow inbound TCP ports 80 and 443. First bring up a working HTTP-only Apache virtual host so Let's Encrypt can validate the domain; then obtain the certificate with Certbot or your certificate manager. Enable `proxy`, `proxy_http`, `proxy_wstunnel`, `rewrite`, `headers`, and `ssl` modules using the commands for your distribution. Copy `deploy/apache-mothernatureacademy.conf` into the Apache virtual-host directory, confirm its `ServerName`, aliases, certificate paths, and the Next.js/FastAPI proxy ports, then run `apachectl configtest` and reload Apache. The sample redirects HTTP to HTTPS and proxies `/api/`, `/health`, and `/media/` to FastAPI and all other requests to Next.js.
 
 Allow inbound TCP ports 80 and 443 through the VPS firewall. Verify the site, API health, and form over HTTPS. Submitting a test inquiry creates a real database record and may send an email.
 
@@ -67,12 +78,11 @@ To preview, configure an Apache virtual host and certificate for `new.mothernatu
 
 ### Pull new code and redeploy
 
-After changes are pushed to GitHub, SSH to the VPS and run:
+After changes are pushed to GitHub, SSH to the VPS and run as root (or use `sudo`):
 
 ```sh
-cd /opt/mothernatureacademy
-git pull --ff-only origin main
-./updateServer.sh
+cd /var/www/mothernatureacademy
+sudo ./updateServer.sh
 ```
 
 Replace `main` if the repository uses another default branch. View logs with `journalctl -u mna-api -u mna-web -n 100 --no-pager`.
@@ -83,7 +93,7 @@ The backend stores each inquiry before attempting email notification. SMTP setti
 
 ## Website admin
 
-Open `/admin` and sign in with the username and password configured for the admin account. The admin page can publish/edit/delete News posts and policy sections, upload and hide/delete campus photos, add/hide/delete YouTube videos, and update the school year, hours, campus location, tuition, registration fee, public contact information, and SMTP settings. Public pages read these values from the API. Uploaded media is saved in the ignored `media/` directory, so keep that directory in server backups.
+Open `/admin` and sign in with the username and password configured for the admin account. The admin page can review registration applications, publish/edit/delete News posts and policy sections, upload and hide/delete campus photos, add/hide/delete YouTube videos, and update the school year, hours, campus location, tuition, registration fee, public contact information, and SMTP settings. Public pages read these values from the API. Uploaded media is saved in the ignored `media/` directory, so keep that directory in server backups.
 
 The `/policies` page presents family-facing summaries seeded from the legacy handbook. Edit or unpublish sections in Admin → Policies; families can use Print / Save as PDF to produce a current copy. The old PDF is not copied to the public site because it contains superseded tuition and staff contact details.
 
@@ -98,7 +108,15 @@ cd /var/www/mothernatureacademy/backend
 ./.venv/bin/python -m app.admin_setup
 ```
 
-Keep `/admin` restricted to trusted administrators. Set `ADMIN_COOKIE_SECURE=true` in the VPS `backend/.env` because the production site is served over HTTPS. The application creates the content tables and starter settings when the API starts. Apache must proxy `/media/` to FastAPI as well as `/api/` and `/health`; the included Apache sample has those routes.
+The setup tool prompts for a username and password, saves only a password hash, and generates a new admin session secret. It replaces any existing admin credentials in `backend/.env`. After it finishes on the VPS, edit that file and set `ADMIN_COOKIE_SECURE=true` (the setup tool defaults this setting to `false`, which is intended for local HTTP development), then restart the API:
+
+```sh
+nano /var/www/mothernatureacademy/backend/.env
+systemctl restart mna-api
+systemctl status mna-api --no-pager
+```
+
+To change the username or password later, run `./.venv/bin/python -m app.admin_setup` again from `/var/www/mothernatureacademy/backend`, enter the new credentials, restore `ADMIN_COOKIE_SECURE=true` in `backend/.env`, and restart `mna-api`. The tool also rotates the session secret, so existing admin sessions are invalidated and administrators must sign in again. Keep `/admin` restricted to trusted administrators. The application creates the content tables and starter settings when the API starts. Apache must proxy `/media/` to FastAPI as well as `/api/` and `/health`; the included Apache sample has those routes.
 
 ## Before public launch
 
@@ -106,7 +124,9 @@ Keep `/admin` restricted to trusted administrators. Set `ADMIN_COOKIE_SECURE=tru
 - Replace temporary Unsplash stock photos with academy-approved images.
 - Confirm form fields, recipient, privacy and retention policy. Do not collect sensitive child health or personal data through the public inquiry form.
 - Set up IP-aware rate limiting, monitoring, off-server database backups, and a tested restore.
-- Keep operating system and container images updated; protect and rotate secrets.
+- Keep the operating system and Node/Python dependencies updated; protect and rotate secrets.
+- Back up PostgreSQL and `media/` together. The database contains families' registration details; encrypt backup files, restrict access, set a retention period, and verify restore steps before relying on the backups.
+- Preserve the Apache virtual-host files, systemd unit files, DNS/mail records, and private environment files in the server migration plan. Recreate them on the replacement VPS; they are not all part of the Git repository.
 
 ## Pages
 

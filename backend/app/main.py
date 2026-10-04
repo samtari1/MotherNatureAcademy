@@ -13,6 +13,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Literal
 from urllib.parse import parse_qs, urlencode, urlparse
+from zoneinfo import ZoneInfo
 
 from cryptography.fernet import Fernet, InvalidToken
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
@@ -733,7 +734,10 @@ def notify_registration(registration: Registration) -> bool:
         "3_days": "Monday, Wednesday, and Friday — $425/month",
         "5_days": "Monday through Friday — $575/month",
     }
-    submitted_at = registration.created_at.strftime("%Y-%m-%d %H:%M UTC")
+    submitted_at_utc = registration.created_at
+    if submitted_at_utc.tzinfo is None:
+        submitted_at_utc = submitted_at_utc.replace(tzinfo=timezone.utc)
+    submitted_at = submitted_at_utc.astimezone(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %I:%M %p %Z")
     child_rows = [
         ("Child", registration.child_name),
         ("Nickname", registration.child_nickname or "Not provided"),
@@ -784,7 +788,7 @@ def notify_registration(registration: Registration) -> bool:
     msg.set_content(
         "NEW REGISTRATION APPLICATION\n"
         f"Mother Nature Academy · School year {registration.school_year}\n"
-        f"Submitted {submitted_at}\n\n"
+        f"Submitted {submitted_at} (Eastern Time)\n\n"
         + plain_section("CHILD & SCHEDULE", child_rows)
         + "\n\n" + plain_section("RESPONSIBLE PARTY", guardian_rows)
         + "\n\n" + plain_section("SECOND RESPONSIBLE PARTY", second_guardian_rows)
@@ -799,7 +803,7 @@ def notify_registration(registration: Registration) -> bool:
         '<div style="font-size:11px;letter-spacing:1.4px;text-transform:uppercase;color:#dce8dc">Mother Nature Academy</div>'
         '<h1 style="margin:8px 0 5px;font-size:24px;line-height:1.25">New registration application</h1>'
         f'<div style="font-size:14px;color:#edf3ec">School year {escape(registration.school_year)}</div>'
-        f'<div style="margin-top:7px;font-size:12px;color:#dce8dc">Submitted {escape(submitted_at)}</div>'
+        f'<div style="margin-top:7px;font-size:12px;color:#dce8dc">Submitted {escape(submitted_at)} (Eastern Time)</div>'
         '</td></tr><tr><td style="padding:10px 28px 28px">'
         + html_section("Child & schedule", child_rows)
         + html_section("Responsible party", guardian_rows)
@@ -904,6 +908,58 @@ def create_registration(payload: RegistrationCreate):
         except Exception:
             logger.exception("Registration email notification failed for registration %s", row.id)
         return {"status": "received", "id": row.id, "notification_sent": notification_sent}
+
+
+@app.get("/api/admin/registrations")
+def list_admin_registrations(_: str = Depends(require_admin)):
+    with SessionLocal() as db:
+        rows = db.scalars(select(Registration).order_by(Registration.created_at.desc(), Registration.id.desc()).limit(200)).all()
+        return [
+            {
+                "id": row.id,
+                "school_year": row.school_year,
+                "child_name": row.child_name,
+                "guardian_name": row.guardian_name,
+                "created_at": row.created_at.isoformat(),
+                "notification_sent": row.notification_sent_at is not None,
+            }
+            for row in rows
+        ]
+
+
+@app.get("/api/admin/registrations/{registration_id}")
+def get_admin_registration(registration_id: int, _: str = Depends(require_admin)):
+    with SessionLocal() as db:
+        row = db.get(Registration, registration_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Registration application not found.")
+        return {
+            "id": row.id,
+            "school_year": row.school_year,
+            "child_name": row.child_name,
+            "child_nickname": row.child_nickname,
+            "child_age": row.child_age,
+            "child_date_of_birth": row.child_date_of_birth.isoformat(),
+            "lives_with": row.lives_with,
+            "schedule": row.schedule,
+            "guardian_name": row.guardian_name,
+            "guardian_relationship": row.guardian_relationship,
+            "address": row.address,
+            "city": row.city,
+            "state": row.state,
+            "postal_code": row.postal_code,
+            "home_phone": row.home_phone,
+            "cell_phone": row.cell_phone,
+            "work_phone": row.work_phone,
+            "guardian_email": row.guardian_email,
+            "second_guardian_name": row.second_guardian_name,
+            "second_guardian_relationship": row.second_guardian_relationship,
+            "second_guardian_phone": row.second_guardian_phone,
+            "second_guardian_email": row.second_guardian_email,
+            "signature": row.signature,
+            "created_at": row.created_at.isoformat(),
+            "notification_sent_at": row.notification_sent_at.isoformat() if row.notification_sent_at else None,
+        }
 
 
 @app.post("/api/admin/login")
