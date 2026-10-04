@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { ArrowUpRight, Leaf, Sun, Footprints, Heart, MapPin, Sparkles } from "lucide-react";
+import { HomeHours } from "@/components/public-site-details";
 
 export default function HomePage() {
   return <>
@@ -21,7 +22,7 @@ export default function HomePage() {
 
     <section className="approach-panel"><div className="container approach-inner"><div><div className="eyebrow eyebrow-light"><span /> CURIOUS MINDS, CONFIDENT BEGINNINGS</div><h2>Play is serious<br /><em>learning.</em></h2></div><div><p>We bring together child-led exploration, thoughtful guidance, and the best learning materials we can offer: time, space, and the natural world. Children follow their interests while building the social, physical, language, and thinking skills that help them thrive.</p><Link className="button button-cream" href="/curriculum">How learning grows here <ArrowUpRight size={17}/></Link></div></div></section>
 
-    <section className="quick-info section-pad"><div className="container quick-grid"><div className="section-label"><span>03</span><span className="label-line" /> A LITTLE PRACTICAL INFO</div><div className="quick-detail"><span className="quick-kicker">OUR MORNING</span><h2>Good days start<br />at <em>9 o’clock.</em></h2><p>Monday through Friday, 9:00 am–12:00 pm<br />Carthage, North Carolina</p><Link className="text-link" href="/hours">Hours & tuition <span>↗</span></Link></div><div className="quick-cta"><MapPin size={22}/><p>Curious if we might be the right fit for your family?</p><Link className="button" href="/register">Start a conversation <ArrowUpRight size={16}/></Link></div></div></section>
+    <section className="quick-info section-pad"><div className="container quick-grid"><div className="section-label"><span>03</span><span className="label-line" /> A LITTLE PRACTICAL INFO</div><div className="quick-detail"><span className="quick-kicker">OUR MORNING</span><h2>Good days start<br />at <em>9 o’clock.</em></h2><HomeHours /><Link className="text-link" href="/hours">Hours & tuition <span>↗</span></Link></div><div className="quick-cta"><MapPin size={22}/><p>Curious if we might be the right fit for your family?</p><Link className="button" href="/register">Start a conversation <ArrowUpRight size={16}/></Link></div></div></section>
 
     <section className="closing-cta"><div className="container closing-inner"><span className="closing-flower">✳</span><p>Every great adventure starts somewhere.</p><h2>Let’s find your<br /><em>child’s next trail.</em></h2><Link className="button button-cream" href="/register">Ask about enrollment <ArrowUpRight size={17}/></Link></div></section>
   </>;

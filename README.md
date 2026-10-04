@@ -1,6 +1,6 @@
 # Mother Nature Academy website
 
-Next.js, FastAPI, and PostgreSQL website, deployed with Docker Compose behind Apache.
+Next.js, FastAPI, and PostgreSQL website. The VPS deployment runs the app with systemd behind Apache; Docker is not required.
 
 ## Run locally on macOS without Docker
 
@@ -10,11 +10,11 @@ Then run `./start.sh`. Open `http://localhost:3000` to use the website. The API 
 
 ## Deploy on a VPS
 
-Apache stays on ports 80 and 443. The Compose stack exposes Next.js on `127.0.0.1:3000`, FastAPI on `127.0.0.1:8000`, and keeps PostgreSQL private in Docker. Apache proxies `/api/` and `/health` to FastAPI, then all other requests to Next.js using `deploy/apache-mothernatureacademy.conf`.
+Apache stays on ports 80 and 443. Next.js listens on `127.0.0.1:3000`, FastAPI on `127.0.0.1:8000`, and PostgreSQL remains private. Apache proxies `/api/`, `/health`, and `/media/` to FastAPI, then other requests to Next.js using `deploy/apache-mothernatureacademy.conf`.
 
 ### Clone and prepare
 
-SSH to the server, install Git, Docker Engine and the Docker Compose plugin for its Linux distribution, then:
+SSH to the server, install Git, Node.js, Python, PostgreSQL, and Apache, then:
 
 ```sh
 sudo mkdir -p /opt/mothernatureacademy
@@ -41,16 +41,19 @@ chmod 600 backend/.env
 
 Edit `backend/.env` with a secure editor. Set `DATABASE_URL` to `postgresql+psycopg://mna_user:YOUR_SAME_POSTGRES_PASSWORD@db:5432/mna`, set `ALLOWED_ORIGINS` to the production HTTPS origins, and enter the SMTP host, user, password, and authorized sender issued by the email provider. Never commit these secret files.
 
-### Build and start containers
+### Build and start the applications
 
 ```sh
-docker compose up -d --build
-docker compose ps
+./backend/.venv/bin/pip install -r backend/requirements.txt
+npm ci
+NEXT_PUBLIC_API_URL=/ npm run build
+sudo systemctl restart mna-api mna-web
+sudo systemctl status mna-api mna-web --no-pager
 curl -fsS http://127.0.0.1:3000/ >/dev/null
 curl -fsS http://127.0.0.1:8000/health
 ```
 
-The containers bind only to loopback. Do not open port 5432 to the Internet.
+Do not open port 5432 to the Internet. PostgreSQL should accept local connections only.
 
 ### Configure Apache and HTTPS
 
@@ -69,15 +72,29 @@ After changes are pushed to GitHub, SSH to the VPS and run:
 ```sh
 cd /opt/mothernatureacademy
 git pull --ff-only origin main
-docker compose up -d --build
-docker compose ps
+./updateServer.sh
 ```
 
-Replace `main` if the repository uses another default branch. View logs with `docker compose logs --tail=100 web api`. PostgreSQL persists in a named volume; do not use `docker compose down -v` during routine updates because it deletes that volume.
+Replace `main` if the repository uses another default branch. View logs with `journalctl -u mna-api -u mna-web -n 100 --no-pager`.
 
 ## Email and inquiry handling
 
-The backend stores each inquiry before attempting email notification. Configure authenticated SMTP using provider-authorized values in `backend/.env`. If delivery fails, the inquiry remains in PostgreSQL. This starter has no admin dashboard or automatic mail retry, so set up a secure review workflow before using the form for live enrollment.
+The backend stores each inquiry before attempting email notification. Configure authenticated SMTP using provider-authorized values in `backend/.env`. If delivery fails, the inquiry remains in PostgreSQL.
+
+## Website admin
+
+Open `/admin` and sign in with the username and password configured for the admin account. The admin page can publish/edit/delete News posts, upload and hide/delete campus photos, add/hide/delete YouTube videos, and update the school year, hours, campus location, tuition, and registration fee. Public pages read these values from the API. Uploaded media is saved in the ignored `media/` directory, so keep that directory in server backups.
+
+On a local macOS environment, `./setup.sh` prompts once for an admin username and password, stores a password hash and session secret in the ignored `backend/.env`, and keeps SMTP disabled. Use `./start.sh` and visit `http://localhost:3000/admin`.
+
+For a VPS already configured without Docker, set up the same admin credentials in the server's private environment file:
+
+```sh
+cd /var/www/mothernatureacademy/backend
+./.venv/bin/python -m app.admin_setup
+```
+
+Keep `/admin` restricted to trusted administrators. Set `ADMIN_COOKIE_SECURE=true` in the VPS `backend/.env` because the production site is served over HTTPS. The application creates the content tables and starter settings when the API starts. Apache must proxy `/media/` to FastAPI as well as `/api/` and `/health`; the included Apache sample has those routes.
 
 ## Before public launch
 
@@ -89,4 +106,4 @@ The backend stores each inquiry before attempting email notification. Configure 
 
 ## Pages
 
-`/`, `/program`, `/curriculum`, `/campus`, `/hours`, `/contact`, and `/register`. Legacy `.html` paths redirect to the corresponding new routes.
+`/`, `/program`, `/curriculum`, `/campus`, `/hours`, `/news`, `/contact`, `/register`, and `/admin`. Legacy `.html` paths redirect to the corresponding new routes.

@@ -2,8 +2,7 @@
 
 import { FormEvent, useState } from "react";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-const INQUIRY_URL = `${API_BASE.replace(/\/+$/, "")}/api/inquiries`;
+const INQUIRY_URL = "/api/inquiries";
 
 export function RegisterForm() {
   const [state, setState] = useState<"idle" | "sending" | "sent" | "saved_without_email" | "error">("idle");

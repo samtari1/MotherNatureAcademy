@@ -51,6 +51,15 @@ git ls-files -z | xargs -0r chmod u=rwX,go=rX
 log "Installing Python dependencies"
 backend/.venv/bin/pip install -r backend/requirements.txt
 
+log "Preparing uploaded-media directory"
+mkdir -p "$APP_DIR/media"
+API_USER="$(systemctl show mna-api.service -p User --value)"
+API_GROUP="$(systemctl show mna-api.service -p Group --value)"
+API_USER="${API_USER:-root}"
+API_GROUP="${API_GROUP:-$API_USER}"
+chown "$API_USER:$API_GROUP" "$APP_DIR/media"
+chmod 750 "$APP_DIR/media"
+
 if [[ -f package-lock.json ]]; then
   log "Installing Node dependencies from package-lock.json"
   npm ci

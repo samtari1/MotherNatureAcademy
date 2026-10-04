@@ -1,11 +1,12 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import { useSiteDetails } from "@/components/public-site-details";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-const REGISTRATION_URL = `${API_BASE.replace(/\/+$/, "")}/api/registrations`;
+const REGISTRATION_URL = "/api/registrations";
 
 export function RegistrationForm() {
+  const siteDetails = useSiteDetails();
   const [state, setState] = useState<"idle" | "sending" | "sent" | "saved_without_email" | "error">("idle");
   const [error, setError] = useState("");
 
@@ -33,14 +34,14 @@ export function RegistrationForm() {
 
   return <form className="register-form" onSubmit={submit}>
     <div className="form-grid">
-      <label className="form-wide">Applying for school year <span>*</span><select name="school_year" required defaultValue="2026-27"><option value="2026-27">2026–2027</option></select></label>
+      <label className="form-wide">Applying for school year <span>*</span><select name="school_year" required value={siteDetails.school_year} onChange={() => {}}><option value={siteDetails.school_year}>{siteDetails.school_year}</option></select></label>
       <label>Child’s full name <span>*</span><input name="child_name" required maxLength={120} autoComplete="off" /></label>
       <label>Nickname<input name="child_nickname" maxLength={80} /></label>
       <label>Child’s age <span>*</span><select name="child_age" required defaultValue=""><option value="" disabled>Select age</option><option>2.5</option><option>3</option><option>4</option><option>5</option><option>Other / not yet born</option></select></label>
       <label>Date of birth <span>*</span><input name="child_date_of_birth" type="date" required /></label>
       <label>Child lives with <span>*</span><select name="lives_with" required defaultValue=""><option value="" disabled>Select one</option><option>Mother</option><option>Father</option><option>Both parents</option><option>Other</option></select></label>
       <label>Schedule <span>*</span><select name="schedule" required defaultValue=""><option value="" disabled>Select a schedule</option><option value="2_days">2 days — Tuesday & Thursday — $325/month</option><option value="3_days">3 days — Monday, Wednesday & Friday — $425/month</option><option value="5_days">5 days — Monday through Friday — $575/month</option></select></label>
-      <p className="form-wide registration-copy">The source registration form lists a $100 registration fee and says enrollment is confirmed by the academy after review. Please confirm current fees and availability with the academy.</p>
+      <p className="form-wide registration-copy">The current registration fee is {siteDetails.registration_fee}. Enrollment is confirmed by the academy after review. Please confirm current fees and availability with the academy.</p>
 
       <h3 className="form-section-title form-wide">Responsible party</h3>
       <label>Full name <span>*</span><input name="guardian_name" required maxLength={120} autoComplete="name" /></label>

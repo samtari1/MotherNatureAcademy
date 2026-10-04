@@ -6,4 +6,5 @@ __pycache__/
 .venv/
 legacyWebsite/
 .local-logs/
+media/
 *.py[cod]

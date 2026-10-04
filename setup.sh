@@ -103,8 +103,14 @@ set_local_env SMTP_PASSWORD ""
 set_local_env SMTP_FROM ""
 set_local_env SMTP_PORT "587"
 set_local_env SMTP_STARTTLS "true"
+set_local_env ADMIN_COOKIE_SECURE "false"
 chmod 600 backend/.env
 unset DB_PASSWORD
+
+if ! grep -q '^ADMIN_PASSWORD_HASH=.' backend/.env || ! grep -q '^ADMIN_SESSION_SECRET=.' backend/.env; then
+  info "Create a private admin login"
+  (cd backend && .venv/bin/python -m app.admin_setup)
+fi
 
 info "Local setup is ready. Run ./start.sh to launch the website and API."
 printf 'The local registration form will save to PostgreSQL and will not send email (SMTP is disabled locally).\n'

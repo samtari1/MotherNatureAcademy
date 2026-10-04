@@ -18,7 +18,7 @@ export function SiteFooter() {
         </div>
         <div className="footer-links">
           <h3>Explore</h3>
-          <Link href="/program">Our approach</Link><Link href="/curriculum">Curriculum</Link><Link href="/hours">Hours & tuition</Link><Link href="/register">Registration inquiry</Link>
+          <Link href="/program">Our approach</Link><Link href="/curriculum">Curriculum</Link><Link href="/hours">Hours & tuition</Link><Link href="/news">News & notes</Link><Link href="/register">Registration inquiry</Link><Link href="/admin">Academy admin</Link>
         </div>
       </div>
       <div className="footer-bottom"><span>© {new Date().getFullYear()} Mother Nature Academy LLC</span><span>Made for little explorers and the people who love them.</span></div>
