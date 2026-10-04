@@ -1,0 +1,6 @@
+{$SITE_DOMAIN:localhost} {
+	encode gzip zstd
+	@api path /api/* /health
+	reverse_proxy @api api:8000
+	reverse_proxy web:3000
+}
