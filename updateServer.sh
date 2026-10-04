@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+umask 022
 
 APP_DIR="/var/www/mothernatureacademy"
 BRANCH="main"
@@ -69,13 +70,26 @@ log "Checking application services"
 systemctl is-active --quiet mna-api.service || fail "mna-api.service is not active. Check: journalctl -u mna-api -n 100 --no-pager"
 systemctl is-active --quiet mna-web.service || fail "mna-web.service is not active. Check: journalctl -u mna-web -n 100 --no-pager"
 
-if ! curl --fail --silent --show-error http://127.0.0.1:8000/health; then
-  fail "API health check failed. Check: journalctl -u mna-api -n 100 --no-pager"
-fi
+API_HEALTHY=false
+for attempt in {1..30}; do
+  if curl --fail --silent http://127.0.0.1:8000/health; then
+    API_HEALTHY=true
+    break
+  fi
+  sleep 1
+done
 printf '\n'
-if ! curl --fail --silent --show-error --output /dev/null http://127.0.0.1:3000/; then
-  fail "Website health check failed. Check: journalctl -u mna-web -n 100 --no-pager"
-fi
+[[ "$API_HEALTHY" == true ]] || fail "API health check failed. Check: journalctl -u mna-api -n 100 --no-pager"
+
+WEB_HEALTHY=false
+for attempt in {1..30}; do
+  if curl --fail --silent --output /dev/null http://127.0.0.1:3000/; then
+    WEB_HEALTHY=true
+    break
+  fi
+  sleep 1
+done
+[[ "$WEB_HEALTHY" == true ]] || fail "Website health check failed. Check: journalctl -u mna-web -n 100 --no-pager"
 
 log "Update completed successfully"
 systemctl --no-pager --full status mna-api.service mna-web.service
