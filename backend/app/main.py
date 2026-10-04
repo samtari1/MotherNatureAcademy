@@ -115,9 +115,19 @@ def notify_academy(inquiry: Inquiry) -> bool:
         f"Message:\n{inquiry.message or 'No message'}\n"
     )
     context = ssl.create_default_context()
-    with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=12) as smtp:
+    if settings.smtp_port == 465:
+        smtp_connection = smtplib.SMTP_SSL(
+            settings.smtp_host,
+            settings.smtp_port,
+            timeout=12,
+            context=context,
+        )
+    else:
+        smtp_connection = smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=12)
+
+    with smtp_connection as smtp:
         smtp.ehlo()
-        if settings.smtp_starttls:
+        if settings.smtp_starttls and settings.smtp_port != 465:
             smtp.starttls(context=context)
             smtp.ehlo()
         smtp.login(settings.smtp_user, settings.smtp_password)
