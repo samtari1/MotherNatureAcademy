@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useState } from "react";
-import { Menu, X, Sprout } from "lucide-react";
+import { Menu, X } from "lucide-react";
 
 const links = [
   ["Our approach", "/program"],
@@ -18,7 +19,7 @@ export function SiteHeader() {
     <header className="site-header">
       <div className="header-inner">
         <Link className="brand" href="/" aria-label="Mother Nature Academy home" onClick={() => setOpen(false)}>
-          <span className="brand-mark"><Sprout size={26} strokeWidth={1.8} /></span>
+          <span className="brand-logo"><Image src="/images/mna-logo.png" alt="" width={56} height={56} priority /></span>
           <span className="brand-text"><strong>Mother Nature</strong><small>ACADEMY · CARTHAGE, NC</small></span>
         </Link>
         <button className="menu-toggle" aria-label={open ? "Close menu" : "Open menu"} onClick={() => setOpen(!open)}>

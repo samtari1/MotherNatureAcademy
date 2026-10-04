@@ -1,12 +1,13 @@
 import Link from "next/link";
-import { Sprout, MapPin, Phone, Mail } from "lucide-react";
+import Image from "next/image";
+import { MapPin, Phone, Mail } from "lucide-react";
 
 export function SiteFooter() {
   return (
     <footer className="site-footer">
       <div className="footer-top">
         <div className="footer-brand">
-          <Link className="brand brand-light" href="/"><span className="brand-mark"><Sprout size={25} /></span><span className="brand-text"><strong>Mother Nature</strong><small>ACADEMY</small></span></Link>
+          <Link className="brand brand-light" href="/"><span className="brand-logo"><Image src="/images/mna-logo.png" alt="" width={56} height={56} /></span><span className="brand-text"><strong>Mother Nature</strong><small>ACADEMY</small></span></Link>
           <p>A little more room to grow.<br />Outdoor learning for curious young minds.</p>
         </div>
         <div className="footer-contact">
