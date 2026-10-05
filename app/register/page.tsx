@@ -14,7 +14,7 @@ export default function RegisterPage() {
         <h2>Let’s get<br/><em>started.</em></h2>
         <p>This is an application, not a confirmed enrollment. The academy will contact you after reviewing the information.</p>
         <div className="aside-contact"><RegistrationContactInfo /></div>
-        <div className="privacy-note">This form does not ask for medical, medication, allergy, immunization, or payment information. Please do not send those details by email. The academy can follow up directly if needed.</div>
+        <div className="privacy-note">Health details entered in the application are encrypted in the database and shown only in the signed-in admin area. They are not included in email notifications. Do not enter debit-card, bank-account, or insurance numbers.</div>
       </div>
       <div className="register-card"><h2>Registration application</h2><p>Fields marked <span>*</span> are required.</p><RegistrationForm/></div>
     </div></section>

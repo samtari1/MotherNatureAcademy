@@ -21,6 +21,6 @@ export function PublicPolicies() {
       <div className="policy-grid">{sections.map((section, index) => <article className="policy-card" key={section.id}>
         <span className="policy-number">{String(index + 1).padStart(2, "0")}</span><h2>{section.title}</h2><p>{section.body}</p>
       </article>)}</div>}
-    <aside className="policy-note"><strong>Need the enrollment forms?</strong><p>Medical, allergy, emergency-contact, and pickup authorization details are handled directly with families during enrollment. Please do not send sensitive health information through the website forms.</p></aside>
+    <aside className="policy-note"><strong>Health information & enrollment forms</strong><p>The registration application includes an encrypted section for relevant child health details. Those details are available only in the signed-in admin area and are not sent by email. Emergency plans, medication procedures, and pickup authorizations should still be discussed directly with the educators.</p></aside>
   </div></section>;
 }

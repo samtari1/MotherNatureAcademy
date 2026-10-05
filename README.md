@@ -8,6 +8,8 @@ Run `./setup.sh` once from the project directory. It installs the Node and Pytho
 
 Then run `./start.sh`. Open `http://localhost:3000` to use the website. The API health endpoint is `http://localhost:8000/health`; press Ctrl+C in the script's terminal to stop both services. Setup and start scripts are for macOS development only and do not update the VPS.
 
+After pulling a version that adds a new environment setting, rerun `./setup.sh` so the ignored local `backend/.env` receives any newly required key. Existing encryption keys are preserved; do not replace them if the database already contains encrypted data.
+
 ## Deploy on a VPS
 
 Apache stays on ports 80 and 443. Next.js listens on `127.0.0.1:3000`, FastAPI on `127.0.0.1:8000`, and PostgreSQL remains private. Apache proxies `/api/`, `/health`, and `/media/` to FastAPI, then other requests to Next.js using `deploy/apache-mothernatureacademy.conf`.
@@ -48,7 +50,7 @@ chmod 600 backend/.env
 python3 -m venv backend/.venv
 ```
 
-Edit `backend/.env` with a secure editor. Set `DATABASE_URL` to `postgresql+psycopg://mna_user:YOUR_SAME_POSTGRES_PASSWORD@127.0.0.1:5432/mna`, `ALLOWED_ORIGINS` to the exact public HTTPS origins, and enter SMTP details supplied by the email provider. Set `ADMIN_COOKIE_SECURE=true` on the HTTPS VPS. Keep `SMTP_CONFIG_ENCRYPTION_KEY` stable and private; it encrypts SMTP passwords saved through the admin. Generate a Fernet key with the command in `backend/.env.example` or let `updateServer.sh` create it on its first run. Never commit `backend/.env` or share it in support messages. GoDaddy email uses its own mail host and DNS records; changing the website A records does not require changing MX, SPF, DKIM, or DMARC records.
+Edit `backend/.env` with a secure editor. Set `DATABASE_URL` to `postgresql+psycopg://mna_user:YOUR_SAME_POSTGRES_PASSWORD@127.0.0.1:5432/mna`, `ALLOWED_ORIGINS` to the exact public HTTPS origins, and enter SMTP details supplied by the email provider. Set `ADMIN_COOKIE_SECURE=true` on the HTTPS VPS. Keep both `SMTP_CONFIG_ENCRYPTION_KEY` and `REGISTRATION_DATA_ENCRYPTION_KEY` stable and private. They encrypt saved SMTP passwords and the sensitive child health details submitted on registration applications; `updateServer.sh` creates missing keys on first run. Back up both keys separately and securely, because losing the registration key makes stored health details unreadable. Never commit `backend/.env` or share it in support messages. GoDaddy email uses its own mail host and DNS records; changing the website A records does not require changing MX, SPF, DKIM, or DMARC records.
 
 ### Build and start the applications
 
@@ -64,7 +66,7 @@ curl -fsS http://127.0.0.1:8000/health
 
 The first `systemctl` commands work only after the `mna-api` and `mna-web` systemd unit files have been installed and configured to run the API and Next.js on `127.0.0.1:8000` and `127.0.0.1:3000`. These host-level unit files are not stored in this Git repository. Before replacing or rebuilding a working VPS, save their definitions with `systemctl cat mna-api mna-web` and keep them in a secure server-setup record. Ensure the API service user can read the application and `backend/.env`, and can write to the `media/` directory; `updateServer.sh` sets the media directory's owner based on the API service. Keep both app ports private behind Apache.
 
-The API creates missing database tables and starter content on first start. SQLAlchemy `create_all` does not update existing table definitions, so back up the database before deploying changes that modify database models and apply any required schema migration before updating the app.
+The API creates missing database tables and starter content on first start. It also applies the additive migration for the encrypted registration details column. SQLAlchemy `create_all` does not update other existing table definitions, so back up the database before deploying model changes and apply any required schema migration before updating the app.
 
 ### Configure Apache and HTTPS
 
@@ -89,11 +91,11 @@ Replace `main` if the repository uses another default branch. View logs with `jo
 
 ## Email and inquiry handling
 
-The backend stores each inquiry before attempting email notification. SMTP settings can be changed by a signed-in administrator under **Admin → Email**. Until an admin saves settings, the API reads the SMTP configuration from `backend/.env`. After saving, the SMTP host, port, username, sender, recipient, and STARTTLS choice are stored in PostgreSQL; a newly entered SMTP password is encrypted in the `mail_configuration` table. A blank password keeps the existing saved password, or falls back to `SMTP_PASSWORD` in `backend/.env` if none has been saved. Keep `SMTP_CONFIG_ENCRYPTION_KEY` in `backend/.env` private and backed up. Local setup and `updateServer.sh` create the key if it is missing. If delivery fails, the inquiry remains in PostgreSQL.
+The backend stores each inquiry and registration application before attempting email notification. SMTP settings can be changed by a signed-in administrator under **Admin → Email**. Until an admin saves settings, the API reads the SMTP configuration from `backend/.env`. After saving, the SMTP host, port, username, sender, recipient, and STARTTLS choice are stored in PostgreSQL; a newly entered SMTP password is encrypted in the `mail_configuration` table. A blank password keeps the existing saved password, or falls back to `SMTP_PASSWORD` in `backend/.env` if none has been saved. The registration form's child health details are encrypted in PostgreSQL, returned only by the authenticated application-detail endpoint, and are never included in the SMTP email. Payment account information is not collected online. If email delivery fails, the application remains in PostgreSQL and can be viewed in Admin → Applications.
 
 ## Website admin
 
-Open `/admin` and sign in with the username and password configured for the admin account. The admin page can review registration applications, publish/edit/delete News posts and policy sections, upload and hide/delete campus photos, add/hide/delete YouTube videos, and update the school year, hours, campus location, tuition, registration fee, public contact information, and SMTP settings. Public pages read these values from the API. Uploaded media is saved in the ignored `media/` directory, so keep that directory in server backups.
+Open `/admin` and sign in with the username and password configured for the admin account. Under **Applications**, administrators can review each submission, including its decrypted health details, and permanently delete an application. The admin can also publish/edit/delete News posts and policy sections, upload and hide/delete campus photos, add/hide/delete YouTube videos, and update the school year, hours, campus location, tuition, registration fee, public contact information, and SMTP settings. Public pages read these values from the API. Uploaded media is saved in the ignored `media/` directory, so keep that directory in server backups.
 
 The `/policies` page presents family-facing summaries seeded from the legacy handbook. Edit or unpublish sections in Admin → Policies; families can use Print / Save as PDF to produce a current copy. The old PDF is not copied to the public site because it contains superseded tuition and staff contact details.
 
@@ -122,10 +124,11 @@ To change the username or password later, run `./.venv/bin/python -m app.admin_s
 
 - Confirm current tuition, fee, calendar, enrollment availability, and contact details.
 - Replace temporary Unsplash stock photos with academy-approved images.
-- Confirm form fields, recipient, privacy and retention policy. Do not collect sensitive child health or personal data through the public inquiry form.
+- Confirm form fields, recipient, privacy and retention policy. Do not collect sensitive child health information through the public inquiry form; the encrypted health section is limited to registration applications.
 - Set up IP-aware rate limiting, monitoring, off-server database backups, and a tested restore.
 - Keep the operating system and Node/Python dependencies updated; protect and rotate secrets.
 - Back up PostgreSQL and `media/` together. The database contains families' registration details; encrypt backup files, restrict access, set a retention period, and verify restore steps before relying on the backups.
+- Deleting an application in Admin removes it from the live database; copies may remain in backups until those backup sets expire under the retention schedule.
 - Preserve the Apache virtual-host files, systemd unit files, DNS/mail records, and private environment files in the server migration plan. Recreate them on the replacement VPS; they are not all part of the Git repository.
 
 ## Pages

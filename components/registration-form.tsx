@@ -2,13 +2,15 @@
 
 import { FormEvent, useState } from "react";
 import { useSiteDetails } from "@/components/public-site-details";
-import { SavedWithoutEmailMessage } from "@/components/contact-details";
+import { SavedWithoutEmailMessage, useContactInfo } from "@/components/contact-details";
 
 const REGISTRATION_URL = "/api/registrations";
 
 export function RegistrationForm() {
   const siteDetails = useSiteDetails();
+  const contactInfo = useContactInfo();
   const [state, setState] = useState<"idle" | "sending" | "sent" | "saved_without_email" | "error">("idle");
+  const [immunizationStatus, setImmunizationStatus] = useState("");
   const [error, setError] = useState("");
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -18,14 +20,27 @@ export function RegistrationForm() {
     const form = event.currentTarget;
     const data = Object.fromEntries(new FormData(form).entries());
     try {
+      const payload: Record<string, unknown> = { ...data };
+      const allergies = Array.from({ length: 3 }, (_, index) => {
+        const allergenKey = `allergen_${index + 1}`;
+        const reactionKey = `reaction_${index + 1}`;
+        const allergen = String(data[allergenKey] ?? "").trim();
+        const reaction = String(data[reactionKey] ?? "").trim();
+        delete payload[allergenKey];
+        delete payload[reactionKey];
+        if (Boolean(allergen) !== Boolean(reaction)) throw new Error(`Please provide both an allergen and its reaction for allergy ${index + 1}, or leave both fields blank.`);
+        return allergen && reaction ? { allergen, reaction } : null;
+      }).filter((entry): entry is { allergen: string; reaction: string } => entry !== null);
+      payload.allergies = allergies;
       const response = await fetch(REGISTRATION_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
+        body: JSON.stringify(payload),
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.detail || "We couldn't submit the application. Please try again or contact the academy.");
       form.reset();
+      setImmunizationStatus("");
       setState(result.notification_sent ? "sent" : "saved_without_email");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
@@ -35,6 +50,7 @@ export function RegistrationForm() {
 
   return <form className="register-form" onSubmit={submit}>
     <div className="form-grid">
+      <h3 className="form-section-title form-wide registration-page-title">Page 1 · Child & family details</h3>
       <label className="form-wide">Applying for school year <span>*</span><select name="school_year" required value={siteDetails.school_year} onChange={() => {}}><option value={siteDetails.school_year}>{siteDetails.school_year}</option></select></label>
       <label>Child’s full name <span>*</span><input name="child_name" required maxLength={120} autoComplete="off" /></label>
       <label>Nickname<input name="child_nickname" maxLength={80} /></label>
@@ -62,10 +78,26 @@ export function RegistrationForm() {
       <label>Phone<input name="second_guardian_phone" type="tel" maxLength={40} /></label>
       <label>Email<input name="second_guardian_email" type="email" maxLength={254} /></label>
 
-      <p className="form-wide registration-copy">Do not enter medical conditions, disabilities, fears, medications, allergies, immunization information, or payment details here. The academy can arrange a direct follow-up for information needed after an initial application.</p>
+      <h3 className="form-section-title form-wide registration-page-title">Page 2 · Health information & agreements</h3>
+      <p className="form-wide registration-copy">Please share information the educators need to understand your child’s needs. Health details are encrypted in the application database, available only to signed-in academy administrators, and are not included in email notifications. Do not enter insurance, debit-card, or bank-account numbers.</p>
+      <label className="form-wide">Medical conditions, disabilities, or debilitating fears<textarea name="medical_conditions" rows={4} maxLength={5000} /></label>
+      <label className="form-wide">Medications your child is taking<textarea name="medications" rows={3} maxLength={5000} /></label>
+      <fieldset className="form-wide allergy-fields"><legend>Known allergies and reactions <small>(up to three; leave both fields blank when not applicable)</small></legend>
+        <div className="allergy-header"><span>Allergic to</span><span>Reaction</span></div>
+        {Array.from({ length: 3 }, (_, index) => <div className="allergy-row" key={index}><label><span className="sr-only">Allergen {index + 1}</span><input name={`allergen_${index + 1}`} maxLength={200} aria-label={`Allergen ${index + 1}`} /></label><label><span className="sr-only">Reaction to allergen {index + 1}</span><input name={`reaction_${index + 1}`} maxLength={300} aria-label={`Reaction to allergen ${index + 1}`} /></label></div>)}
+      </fieldset>
+      <label>Are your child’s immunizations up to date? <span>*</span><select name="immunizations_up_to_date" required value={immunizationStatus} onChange={event => setImmunizationStatus(event.target.value)}><option value="" disabled>Select one</option><option value="yes">Yes</option><option value="no">No</option></select></label>
+      <label className="form-wide">If no, please tell us why{immunizationStatus === "no" && <> <span>*</span></>}<textarea name="immunization_explanation" rows={3} maxLength={2000} required={immunizationStatus === "no"} /></label>
+      <label className="form-wide">Other considerations you would like the academy to know<textarea name="other_considerations" rows={4} maxLength={5000} /></label>
+      <p className="form-wide registration-copy enrollment-terms">Registering does not guarantee enrollment. The academy will review each application individually and discuss whether the program can reasonably support the child’s participation. If accepted, the academy will send a confirmation within one week after receiving this application and the {siteDetails.registration_fee} registration fee. If the academy cannot enroll the child, it will send an explanation and return the registration fee.</p>
+      <label className="form-wide">Initial to acknowledge the enrollment terms above <span>*</span><input name="admission_policy_initials" required maxLength={20} autoComplete="off" /></label>
+      <p className="form-wide registration-copy registration-mailing">If mailing the registration fee, make it payable to {contactInfo.business_name} and mail it to: {contactInfo.mailing_street}, {contactInfo.mailing_city}, {contactInfo.mailing_state} {contactInfo.mailing_postal_code}. Do not mail cash.</p>
+      <label className="form-wide checkbox-label"><input name="payment_terms_acknowledged" type="checkbox" required value="yes" /><span>I agree to the monthly tuition draft terms for the selected schedule. Tuition will be drafted on the 1st of each month. I will provide debit- or credit-card payment details directly to the academy before September 1. This website form does not collect payment account information.</span></label>
+      <label className="form-wide checkbox-label"><input name="health_information_consent" type="checkbox" required value="yes" /><span>I authorize the academy to receive and store the child health information I chose to provide in this application. I understand it is encrypted in storage, available to authorized academy administrators, and excluded from email notifications.</span></label>
       <label className="form-wide checkbox-label"><input name="accuracy_confirmed" type="checkbox" required value="yes" /><span>I confirm that the information above is accurate to the best of my knowledge.</span></label>
       <label className="form-wide checkbox-label"><input name="application_acknowledged" type="checkbox" required value="yes" /><span>I understand this is an application and does not guarantee enrollment. The academy will contact me about acceptance and next steps.</span></label>
       <label className="form-wide">Typed parent or guardian signature <span>*</span><input name="signature" required maxLength={120} autoComplete="name" /></label>
+      <p className="form-wide registration-copy">Your submission date is recorded automatically and this typed signature applies to the application and acknowledgments above.</p>
       <div className="form-trap" aria-hidden="true"><label>Leave this field blank<input name="website" tabIndex={-1} autoComplete="off" /></label></div>
     </div>
     <div className="form-submit"><button className="button" type="submit" disabled={state === "sending"}>{state === "sending" ? "Submitting…" : "Submit application"}<span aria-hidden="true">↗</span></button><small>The academy will review the application and follow up. Submission is not confirmed enrollment.</small></div>

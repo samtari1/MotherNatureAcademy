@@ -59,6 +59,14 @@ if ! grep -q '^SMTP_CONFIG_ENCRYPTION_KEY=.' backend/.env; then
   unset SMTP_CONFIG_ENCRYPTION_KEY
 fi
 
+if ! grep -q '^REGISTRATION_DATA_ENCRYPTION_KEY=.' backend/.env; then
+  log "Creating the registration health-data encryption key"
+  REGISTRATION_DATA_ENCRYPTION_KEY="$(backend/.venv/bin/python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
+  printf '\nREGISTRATION_DATA_ENCRYPTION_KEY=%s\n' "$REGISTRATION_DATA_ENCRYPTION_KEY" >> backend/.env
+  chmod 600 backend/.env
+  unset REGISTRATION_DATA_ENCRYPTION_KEY
+fi
+
 log "Preparing uploaded-media directory"
 mkdir -p "$APP_DIR/media"
 API_USER="$(systemctl show mna-api.service -p User --value)"

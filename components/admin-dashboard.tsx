@@ -15,7 +15,8 @@ type AcademicCalendar = { id: number; school_year: string; title: string; notes:
 type SiteContent = { hours: string; campus_location: string; tuition_2_days: string; tuition_3_days: string; tuition_5_days: string; registration_fee: string; school_year: string };
 type SmtpSettings = { enabled: boolean; smtp_host: string; smtp_port: number; smtp_user: string; smtp_password: string; smtp_from: string; notification_email: string; smtp_starttls: boolean; smtp_password_set: boolean; encryption_key_configured: boolean };
 type RegistrationSummary = { id: number; school_year: string; child_name: string; guardian_name: string; created_at: string; notification_sent: boolean };
-type RegistrationDetail = RegistrationSummary & { guardian_email: string; child_nickname: string | null; child_age: string; child_date_of_birth: string; lives_with: string; schedule: string; guardian_relationship: string; address: string; city: string; state: string; postal_code: string; home_phone: string | null; cell_phone: string; work_phone: string | null; second_guardian_name: string | null; second_guardian_relationship: string | null; second_guardian_phone: string | null; second_guardian_email: string | null; signature: string; notification_sent_at: string | null };
+type RegistrationPageTwo = { medical_conditions: string; medications: string; allergies: { allergen: string; reaction: string }[]; immunizations_up_to_date: string; immunization_explanation: string; other_considerations: string; health_information_consent: boolean; admission_policy_initials: string; payment_terms_acknowledged: boolean };
+type RegistrationDetail = RegistrationSummary & { guardian_email: string; child_nickname: string | null; child_age: string; child_date_of_birth: string; lives_with: string; schedule: string; guardian_relationship: string; address: string; city: string; state: string; postal_code: string; home_phone: string | null; cell_phone: string; work_phone: string | null; second_guardian_name: string | null; second_guardian_relationship: string | null; second_guardian_phone: string | null; second_guardian_email: string | null; signature: string; page_two: RegistrationPageTwo; notification_sent_at: string | null };
 type AdminTab = "news" | "media" | "policies" | "calendar" | "details" | "email" | "contacts" | "applications";
 
 const adminTabRoutes: Record<AdminTab, string> = { news: "news", media: "media", policies: "policies", calendar: "calendar", details: "hours", contacts: "contacts", email: "email", applications: "applications" };
@@ -41,6 +42,20 @@ async function request(path: string, init: RequestInit = {}) {
 
 function ApplicationSection({ title, rows }: { title: string; rows: [string, string | null | undefined][] }) {
   return <section className="application-detail-section"><h4>{title}</h4><dl>{rows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value || "Not provided"}</dd></div>)}</dl></section>;
+}
+
+function registrationHealthRows(page: RegistrationPageTwo): [string, string][] {
+  const rows: [string, string][] = [["Medical conditions, disabilities, or fears", page.medical_conditions], ["Medications", page.medications]];
+  page.allergies.forEach((allergy, index) => {
+    rows.push([`Allergy ${index + 1}`, allergy.allergen], [`Reaction ${index + 1}`, allergy.reaction]);
+  });
+  rows.push(
+    ["Immunizations up to date", page.immunizations_up_to_date === "yes" ? "Yes" : page.immunizations_up_to_date === "no" ? "No" : "Not provided"],
+    ["Immunization explanation", page.immunization_explanation],
+    ["Other considerations", page.other_considerations],
+    ["Health information consent", page.health_information_consent ? "Confirmed" : "Not recorded"],
+  );
+  return rows;
 }
 
 export function AdminDashboard() {
@@ -135,6 +150,16 @@ export function AdminDashboard() {
   async function refreshRegistrations() {
     try { setRegistrations(await request("/api/admin/registrations")); setNotice("Applications refreshed."); }
     catch (err) { setError(err instanceof Error ? err.message : "Could not refresh applications."); }
+  }
+
+  async function removeRegistration(application: RegistrationSummary) {
+    if (!window.confirm(`Permanently delete the application for ${application.child_name}? This cannot be undone.`)) return;
+    try {
+      await request(`/api/admin/registrations/${application.id}`, { method: "DELETE" });
+      setRegistrations(current => current.filter(item => item.id !== application.id));
+      setSelectedRegistration(null);
+      setNotice("Application deleted.");
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not delete the application."); }
   }
 
   async function saveNews(event: FormEvent<HTMLFormElement>) {
@@ -326,10 +351,12 @@ export function AdminDashboard() {
         {loadingRegistration && <p>Loading application…</p>}
         {!loadingRegistration && !selectedRegistration && <p>Select an application to view its details.</p>}
         {selectedRegistration && <>
-          <div className="application-detail-heading"><div><span className="eyebrow"><span/> APPLICATION #{selectedRegistration.id}</span><h3>{selectedRegistration.child_name}</h3><p>School year {selectedRegistration.school_year} · Submitted {easternDateTime(selectedRegistration.created_at)}</p></div><button type="button" className="admin-secondary" onClick={() => setSelectedRegistration(null)}>Close</button></div>
+          <div className="application-detail-heading"><div><span className="eyebrow"><span/> APPLICATION #{selectedRegistration.id}</span><h3>{selectedRegistration.child_name}</h3><p>School year {selectedRegistration.school_year} · Submitted {easternDateTime(selectedRegistration.created_at)}</p></div><div className="admin-actions"><button type="button" className="admin-secondary" onClick={() => setSelectedRegistration(null)}>Close</button><button type="button" className="admin-danger" onClick={() => removeRegistration(selectedRegistration)}>Delete application</button></div></div>
           <ApplicationSection title="Child & schedule" rows={[["Nickname", selectedRegistration.child_nickname], ["Age", selectedRegistration.child_age], ["Date of birth", selectedRegistration.child_date_of_birth], ["Lives with", selectedRegistration.lives_with], ["Schedule", selectedRegistration.schedule.replaceAll("_", " ")]]} />
           <ApplicationSection title="Responsible party" rows={[["Name", selectedRegistration.guardian_name], ["Relationship", selectedRegistration.guardian_relationship], ["Address", `${selectedRegistration.address}, ${selectedRegistration.city}, ${selectedRegistration.state} ${selectedRegistration.postal_code}`], ["Cell phone", selectedRegistration.cell_phone], ["Home phone", selectedRegistration.home_phone], ["Work phone", selectedRegistration.work_phone], ["Email", selectedRegistration.guardian_email]]} />
           <ApplicationSection title="Second responsible party" rows={[["Name", selectedRegistration.second_guardian_name], ["Relationship", selectedRegistration.second_guardian_relationship], ["Phone", selectedRegistration.second_guardian_phone], ["Email", selectedRegistration.second_guardian_email]]} />
+          <ApplicationSection title="Page 2 · Health information" rows={registrationHealthRows(selectedRegistration.page_two)} />
+          <ApplicationSection title="Page 2 · Agreements" rows={[["Enrollment terms initials", selectedRegistration.page_two.admission_policy_initials], ["Monthly tuition draft terms", selectedRegistration.page_two.payment_terms_acknowledged ? "Accepted" : "Not recorded"]]} />
           <ApplicationSection title="Submission" rows={[["Typed signature", selectedRegistration.signature], ["Email notification", selectedRegistration.notification_sent_at ? `Sent ${easternDateTime(selectedRegistration.notification_sent_at)}` : "Not sent or not recorded"]]} />
         </>}
       </div></div>

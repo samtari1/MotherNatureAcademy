@@ -109,6 +109,11 @@ if ! grep -q '^SMTP_CONFIG_ENCRYPTION_KEY=.' backend/.env; then
   set_local_env SMTP_CONFIG_ENCRYPTION_KEY "$SMTP_CONFIG_ENCRYPTION_KEY"
   unset SMTP_CONFIG_ENCRYPTION_KEY
 fi
+if ! grep -q '^REGISTRATION_DATA_ENCRYPTION_KEY=.' backend/.env; then
+  REGISTRATION_DATA_ENCRYPTION_KEY="$(backend/.venv/bin/python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
+  set_local_env REGISTRATION_DATA_ENCRYPTION_KEY "$REGISTRATION_DATA_ENCRYPTION_KEY"
+  unset REGISTRATION_DATA_ENCRYPTION_KEY
+fi
 set_local_env ADMIN_COOKIE_SECURE "false"
 chmod 600 backend/.env
 unset DB_PASSWORD

@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 from datetime import date, datetime, timezone
 from email.message import EmailMessage
 from html import escape
+import json
 from pathlib import Path
 import smtplib
 import ssl
@@ -18,9 +19,9 @@ from zoneinfo import ZoneInfo
 from cryptography.fernet import Fernet, InvalidToken
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Text, create_engine, select, update
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Text, create_engine, select, text, update
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 from starlette.staticfiles import StaticFiles
 
@@ -41,6 +42,7 @@ class Settings(BaseSettings):
     smtp_from: str = ""
     smtp_starttls: bool = True
     smtp_config_encryption_key: str = ""
+    registration_data_encryption_key: str = ""
     admin_username: str = ""
     admin_password_hash: str = ""
     admin_session_secret: str = ""
@@ -98,6 +100,7 @@ class Registration(Base):
     second_guardian_phone: Mapped[str | None] = mapped_column(String(40))
     second_guardian_email: Mapped[str | None] = mapped_column(String(254))
     signature: Mapped[str] = mapped_column(String(120), nullable=False)
+    additional_data_encrypted: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     notification_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -218,10 +221,58 @@ class CalendarEvent(Base):
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
+def ensure_registration_data_column() -> None:
+    # create_all creates this column on fresh installs, but does not add columns
+    # to existing installations. This additive migration preserves old records.
+    with engine.begin() as connection:
+        connection.execute(text("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS additional_data_encrypted TEXT"))
+
+
+def encrypt_registration_page_two(payload: "RegistrationCreate") -> str:
+    key = settings.registration_data_encryption_key
+    if not key:
+        raise HTTPException(status_code=503, detail="Registration health-data encryption is not configured. Please contact the academy directly.")
+    try:
+        cipher = Fernet(key.encode())
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=503, detail="Registration health-data encryption is unavailable. Please contact the academy directly.") from exc
+    details = {
+        "medical_conditions": payload.medical_conditions or "",
+        "medications": payload.medications or "",
+        "allergies": [item.model_dump() for item in payload.allergies],
+        "immunizations_up_to_date": payload.immunizations_up_to_date,
+        "immunization_explanation": payload.immunization_explanation or "",
+        "other_considerations": payload.other_considerations or "",
+        "health_information_consent": True,
+        "admission_policy_initials": payload.admission_policy_initials,
+        "payment_terms_acknowledged": True,
+    }
+    return cipher.encrypt(json.dumps(details, ensure_ascii=False, separators=(",", ":")).encode()).decode()
+
+
+def decrypt_registration_page_two(encrypted: str | None) -> dict:
+    empty = {
+        "medical_conditions": "", "medications": "", "allergies": [],
+        "immunizations_up_to_date": "", "immunization_explanation": "",
+        "other_considerations": "", "health_information_consent": False,
+        "admission_policy_initials": "", "payment_terms_acknowledged": False,
+    }
+    if not encrypted:
+        return empty
+    key = settings.registration_data_encryption_key
+    if not key:
+        raise HTTPException(status_code=503, detail="Registration data cannot be decrypted. Restore REGISTRATION_DATA_ENCRYPTION_KEY from the server backup.")
+    try:
+        return json.loads(Fernet(key.encode()).decrypt(encrypted.encode()))
+    except (InvalidToken, ValueError, TypeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=503, detail="Registration data cannot be decrypted. Check REGISTRATION_DATA_ENCRYPTION_KEY.") from exc
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     Path(settings.media_dir).mkdir(parents=True, exist_ok=True)
     Base.metadata.create_all(engine)
+    ensure_registration_data_column()
     seed_content()
     yield
 
@@ -321,14 +372,27 @@ def seed_content() -> None:
                 ("outdoor-learning-and-safety", "Outdoor learning & safety", "Outdoor play and exploration are central to the academy day. Educators supervise activities and help children learn to notice and navigate age-appropriate risks. Campus activities and outdoor time may change with weather or site conditions; the academy communicates closures and schedule changes through its current family channels."),
                 ("enrollment", "Enrollment & availability", "Families may submit an application or inquiry through the website. Applications are reviewed by the academy, and submitting a form does not guarantee a place. Age eligibility, schedules, fees, and availability can change by school year; please confirm the current details with the academy before making enrollment plans."),
                 ("clothing-and-belongings", "Clothing & belongings", "Please dress children for the day’s weather in comfortable, washable layers suitable for outdoor play. Label clothing and any requested outdoor gear. Ask the academy what spare clothing or weather gear to keep on campus. Please leave toys and valuables at home unless you have arranged a comfort item with the educators."),
-                ("snacks-and-allergies", "Snacks & food allergies", "The academy’s handbook describes snacks being provided during the morning. Families should speak directly with the educators about allergies, dietary needs, or other food concerns before a child attends, so the academy can confirm the current plan. Please do not include sensitive medical details in the public inquiry or registration forms."),
-                ("health-and-medications", "Health, illness & medication", "Please keep a child home when they are unwell or unable to participate comfortably. Contact the academy directly for its current illness, return-to-school, emergency, and medication procedures. Share health needs and emergency plans directly with the educators through the academy’s enrollment process rather than through the public website forms."),
+                ("snacks-and-allergies", "Snacks & food allergies", "The academy’s handbook describes snacks being provided during the morning. Families should speak directly with the educators about allergies, dietary needs, or other food concerns before a child attends, so the academy can confirm the current plan. Do not include detailed health information in the public inquiry form or email. The registration application has a separate encrypted section for relevant child health details."),
+                ("health-and-medications", "Health, illness & medication", "Please keep a child home when they are unwell or unable to participate comfortably. Contact the academy directly for its current illness, return-to-school, emergency, and medication procedures. Use the encrypted health-information section on the registration application for relevant health details. Discuss emergency plans and care procedures directly with the educators before the first day; do not send detailed health records by email."),
                 ("toileting-and-personal-care", "Toileting & personal care", "Children’s toileting and personal-care needs vary. Please discuss your child’s needs and the support they may require with the educators before the first day, so the academy can explain its current practices and agree on a plan with your family."),
                 ("arrival-and-pickup", "Arrival, departure & authorized pickup", "The academy may assign arrival and pickup times to help the day run smoothly. Please confirm your family’s current assigned times and pickup authorization requirements with the educators, and contact the academy if plans change or you expect to be delayed."),
                 ("family-participation", "Family participation & visitors", "Families are welcome to ask about classroom visits, enrichment, volunteering, or mentorship opportunities. All visits and volunteer participation must be arranged with the academy in advance and follow its current supervision, safety, and screening requirements."),
                 ("positive-guidance", "Positive guidance", "The academy’s handbook describes a positive-guidance approach that helps children build self-regulation, communication, and problem-solving skills. Educators guide children toward safe, respectful ways to resolve challenges and work with families when a child needs support."),
             ]
             db.add_all([PolicySection(slug=slug, title=title, body=body, sort_order=(index + 1) * 10) for index, (slug, title, body) in enumerate(sections)])
+        else:
+            health_policy = db.scalar(select(PolicySection).where(PolicySection.slug == "health-and-medications"))
+            if health_policy and "through the academy’s enrollment process rather than through the public website forms" in health_policy.body:
+                health_policy.body = health_policy.body.replace(
+                    "Share health needs and emergency plans directly with the educators through the academy’s enrollment process rather than through the public website forms.",
+                    "Use the encrypted health-information section on the registration application for relevant health details. Discuss emergency plans and care procedures directly with the educators before the first day; do not send detailed health records by email.",
+                )
+            allergy_policy = db.scalar(select(PolicySection).where(PolicySection.slug == "snacks-and-allergies"))
+            if allergy_policy and "Please do not include sensitive medical details in the public inquiry or registration forms." in allergy_policy.body:
+                allergy_policy.body = allergy_policy.body.replace(
+                    "Please do not include sensitive medical details in the public inquiry or registration forms.",
+                    "Do not include detailed health information in the public inquiry form or email. The registration application has a separate encrypted section for relevant child health details.",
+                )
         # Seed current and historical school calendars transcribed from the
         # academy's legacy calendar documents. Older years remain published
         # for reference; only 2026–2027 is selected as the current calendar.
@@ -387,6 +451,16 @@ class InquiryCreate(BaseModel):
         return value
 
 
+class AllergyEntry(BaseModel):
+    allergen: str = Field(min_length=1, max_length=200)
+    reaction: str = Field(min_length=1, max_length=300)
+
+    @field_validator("allergen", "reaction", mode="before")
+    @classmethod
+    def strip_allergy_fields(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+
 class RegistrationCreate(BaseModel):
     school_year: str = Field(min_length=1, max_length=12)
     child_name: str = Field(min_length=1, max_length=120)
@@ -412,6 +486,15 @@ class RegistrationCreate(BaseModel):
     signature: str = Field(min_length=1, max_length=120)
     accuracy_confirmed: Literal["yes"]
     application_acknowledged: Literal["yes"]
+    medical_conditions: str | None = Field(default=None, max_length=5000)
+    medications: str | None = Field(default=None, max_length=5000)
+    allergies: list[AllergyEntry] = Field(default_factory=list, max_length=5)
+    immunizations_up_to_date: Literal["yes", "no"]
+    immunization_explanation: str | None = Field(default=None, max_length=2000)
+    other_considerations: str | None = Field(default=None, max_length=5000)
+    health_information_consent: Literal["yes"]
+    admission_policy_initials: str = Field(min_length=1, max_length=20)
+    payment_terms_acknowledged: Literal["yes"]
     website: str | None = Field(default=None, max_length=300)
 
     @field_validator("child_name", "guardian_name", "guardian_relationship", "address", "city", "postal_code", "signature", mode="before")
@@ -419,7 +502,7 @@ class RegistrationCreate(BaseModel):
     def strip_required_strings(cls, value):
         return value.strip() if isinstance(value, str) else value
 
-    @field_validator("child_nickname", "home_phone", "work_phone", "second_guardian_name", "second_guardian_relationship", "second_guardian_phone", mode="before")
+    @field_validator("child_nickname", "home_phone", "work_phone", "second_guardian_name", "second_guardian_relationship", "second_guardian_phone", "medical_conditions", "medications", "immunization_explanation", "other_considerations", mode="before")
     @classmethod
     def strip_registration_optional_strings(cls, value):
         if isinstance(value, str):
@@ -436,6 +519,17 @@ class RegistrationCreate(BaseModel):
     @classmethod
     def empty_second_email_is_missing(cls, value):
         return None if value == "" else value
+
+    @field_validator("admission_policy_initials", mode="before")
+    @classmethod
+    def strip_policy_initials(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+    @model_validator(mode="after")
+    def require_immunization_explanation(self):
+        if self.immunizations_up_to_date == "no" and not self.immunization_explanation:
+            raise ValueError("Please explain why the child's immunizations are not up to date.")
+        return self
 
 
 class AdminLogin(BaseModel):
@@ -794,7 +888,7 @@ def notify_registration(registration: Registration) -> bool:
         + "\n\n" + plain_section("SECOND RESPONSIBLE PARTY", second_guardian_rows)
         + f"\n\nSIGNATURE & ACKNOWLEDGMENT\nTyped signature: {registration.signature}\n"
         "The family confirmed the application details and acknowledged that submission does not guarantee enrollment.\n\n"
-        "Privacy note: Medical, medication, allergy, immunization, and payment details are not collected by this web form."
+        "Privacy note: Child health details are encrypted in the application record and are not included in this email notification. Payment account details are not collected by this form."
     )
     msg.add_alternative(
         '<!doctype html><html><body style="margin:0;padding:24px;background:#f3f5f1;font-family:Arial,Helvetica,sans-serif;color:#27372d">'
@@ -813,7 +907,7 @@ def notify_registration(registration: Registration) -> bool:
         + f'<strong>Typed signature:</strong> {escape(registration.signature)}<br>'
         + 'The family confirmed the application details and acknowledged that submission does not guarantee enrollment.</p>'
         + '<p style="margin:18px 0 0;color:#758075;font-size:11px;line-height:1.6">'
-        + 'Privacy note: Medical, medication, allergy, immunization, and payment details are not collected by this web form.</p>'
+        + 'Privacy note: Child health details are encrypted in the application record and are not included in this email notification. Payment account details are not collected by this form.</p>'
         + '</td></tr></table></body></html>',
         subtype="html",
     )
@@ -890,7 +984,12 @@ def create_registration(payload: RegistrationCreate):
         ).all()
         if len(recent) >= 20:
             raise HTTPException(status_code=429, detail="Please wait a moment before trying again.")
-        row = Registration(**payload.model_dump(exclude={"accuracy_confirmed", "application_acknowledged", "website"}))
+        row = Registration(**payload.model_dump(exclude={
+            "accuracy_confirmed", "application_acknowledged", "website", "medical_conditions", "medications",
+            "allergies", "immunizations_up_to_date", "immunization_explanation", "other_considerations",
+            "health_information_consent", "admission_policy_initials", "payment_terms_acknowledged",
+        }))
+        row.additional_data_encrypted = encrypt_registration_page_two(payload)
         row.guardian_email = str(payload.guardian_email)
         if payload.second_guardian_email:
             row.second_guardian_email = str(payload.second_guardian_email)
@@ -957,9 +1056,22 @@ def get_admin_registration(registration_id: int, _: str = Depends(require_admin)
             "second_guardian_phone": row.second_guardian_phone,
             "second_guardian_email": row.second_guardian_email,
             "signature": row.signature,
+            "page_two": decrypt_registration_page_two(row.additional_data_encrypted),
             "created_at": row.created_at.isoformat(),
             "notification_sent_at": row.notification_sent_at.isoformat() if row.notification_sent_at else None,
         }
+
+
+@app.delete("/api/admin/registrations/{registration_id}")
+def delete_admin_registration(registration_id: int, request: Request, _: str = Depends(require_admin)):
+    allowed_admin_origin(request)
+    with SessionLocal() as db:
+        row = db.get(Registration, registration_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Registration application not found.")
+        db.delete(row)
+        db.commit()
+    return {"status": "deleted"}
 
 
 @app.post("/api/admin/login")
