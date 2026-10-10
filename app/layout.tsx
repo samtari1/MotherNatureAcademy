@@ -18,7 +18,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="en">
       <body>
         <SiteHeader />
-        <PageCopyProvider><main>{children}</main></PageCopyProvider>
+        <PageCopyProvider><main className="page-layout-canvas">{children}</main></PageCopyProvider>
         <SiteFooter />
       </body>
     </html>

@@ -1,9 +1,9 @@
 "use client";
 
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useEffect, useRef, useState, type DragEvent } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { initialContactInfo, type ContactInfo } from "@/components/contact-details";
-import { defaultPageCopy, editablePages, type PageCopyMap } from "@/components/page-copy";
+import { defaultPageCopy, editablePages, type CopyElementLayout, type PageBlock, type PageBlockType, type PageCopyMap } from "@/components/page-copy";
 
 const apiUrl = (path: string) => path;
 const mediaUrl = (url: string) => url;
@@ -31,6 +31,60 @@ function adminTabFromPath(pathname: string): AdminTab {
 const initialContent: SiteContent = { hours: "", campus_location: "", tuition_2_days: "", tuition_3_days: "", tuition_5_days: "", registration_fee: "", school_year: "" };
 const initialSmtp: SmtpSettings = { enabled: false, smtp_host: "", smtp_port: 587, smtp_user: "", smtp_password: "", smtp_from: "", notification_email: "", smtp_starttls: true, smtp_password_set: false, encryption_key_configured: false };
 const easternDateTime = (value: string) => new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" }).format(new Date(value));
+
+function previewTextColor(hex: string) {
+  const channels = hex.slice(1).match(/.{2}/g)?.map(channel => parseInt(channel, 16) / 255) ?? [1, 1, 1];
+  const luminance = channels.map(channel => channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4).reduce((sum, channel, index) => sum + channel * [0.2126, 0.7152, 0.0722][index], 0);
+  return luminance < 0.38 ? "#fffefa" : "#26382f";
+}
+
+function PageBlockEditor({ blocks, onChange }: { blocks: PageBlock[]; onChange: (blocks: PageBlock[]) => void }) {
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  function addBlock(type: PageBlockType) {
+    const base: PageBlock = { id: crypto.randomUUID(), type, heading: "", body: "", background: "#fffefa", layout: type === "image" || type === "video" ? "image-left" : type === "callout" ? "centered" : "standard" };
+    onChange([...blocks, base]);
+  }
+  function updateBlock(index: number, patch: Partial<PageBlock>) {
+    onChange(blocks.map((block, blockIndex) => blockIndex === index ? { ...block, ...patch } : block));
+  }
+  function moveBlock(index: number, direction: -1 | 1) {
+    const next = [...blocks];
+    const target = index + direction;
+    if (target < 0 || target >= next.length) return;
+    [next[index], next[target]] = [next[target], next[index]];
+    onChange(next);
+  }
+  function dropBlock(event: DragEvent<HTMLFieldSetElement>, targetIndex: number) {
+    event.preventDefault();
+    if (draggedIndex === null || draggedIndex === targetIndex) return;
+    const next = [...blocks];
+    const [moving] = next.splice(draggedIndex, 1);
+    next.splice(targetIndex, 0, moving);
+    onChange(next);
+    setDraggedIndex(null);
+  }
+  return <div className="page-block-editor">
+    <div className="page-block-add"><strong>Page sections</strong><span>{blocks.length}/30 blocks · drag the handle to reorder</span>
+      {(["text", "image", "video", "callout"] as PageBlockType[]).map(type => <button key={type} type="button" className="admin-secondary" disabled={blocks.length >= 30} onClick={() => addBlock(type)}>+ {type === "text" ? "Text" : type === "image" ? "Image" : type === "video" ? "Video" : "Callout"}</button>)}
+    </div>
+    {blocks.length === 0 && <p className="smtp-password-status">No extra sections yet. Add a block to extend this page.</p>}
+    {blocks.map((block, index) => <fieldset className={`page-block-card${draggedIndex === index ? " is-dragging" : ""}`} key={block.id} onDragOver={event => event.preventDefault()} onDrop={event => dropBlock(event, index)}>
+      <legend>{index + 1}. {block.type[0].toUpperCase() + block.type.slice(1)} block</legend>
+      <div className="page-block-preview" style={{ backgroundColor: block.background, color: previewTextColor(block.background) }}>
+        {(block.type === "image" && block.image_url) ? <img src={block.image_url} alt="" /> : block.type === "video" ? <span className="page-block-preview-media">▶ Video</span> : null}
+        <div><strong>{block.heading || `${block.type[0].toUpperCase()}${block.type.slice(1)} section`}</strong><p>{block.body || "Your section text will appear here."}</p>{block.type === "callout" && block.button_label && <span className="page-block-preview-button">{block.button_label}</span>}</div>
+      </div>
+      <div className="admin-actions"><button type="button" className="page-block-drag-handle" draggable onDragStart={() => setDraggedIndex(index)} onDragEnd={() => setDraggedIndex(null)} aria-label={`Drag to reorder block ${index + 1}`}>⠿ Drag to reorder</button><button type="button" className="admin-secondary" disabled={index === 0} onClick={() => moveBlock(index, -1)}>Move up</button><button type="button" className="admin-secondary" disabled={index === blocks.length - 1} onClick={() => moveBlock(index, 1)}>Move down</button><button type="button" className="admin-danger" onClick={() => onChange(blocks.filter((_, i) => i !== index))}>Remove block</button></div>
+      <label>Heading<input maxLength={180} value={block.heading} onChange={event => updateBlock(index, { heading: event.target.value })} /></label>
+      <label>Text<textarea rows={4} maxLength={4000} value={block.body} onChange={event => updateBlock(index, { body: event.target.value })} /></label>
+      <label>Layout<select value={block.layout ?? "standard"} onChange={event => updateBlock(index, { layout: event.target.value as PageBlock["layout"] })}><option value="standard">Standard</option><option value="image-left">Media on the left</option><option value="image-right">Media on the right</option><option value="centered">Centered</option></select></label>
+      {block.type === "image" && <><label>Image URL<input type="text" placeholder="/media/photo.jpg or https://…" value={block.image_url ?? ""} onChange={event => updateBlock(index, { image_url: event.target.value })} /></label><label>Alternative text<input maxLength={300} value={block.image_alt ?? ""} onChange={event => updateBlock(index, { image_alt: event.target.value })} /></label><label>Caption<input maxLength={500} value={block.caption ?? ""} onChange={event => updateBlock(index, { caption: event.target.value })} /></label></>}
+      {block.type === "video" && <label>YouTube video URL<input type="url" placeholder="https://www.youtube.com/watch?v=…" value={block.video_url ?? ""} onChange={event => updateBlock(index, { video_url: event.target.value })} /></label>}
+      {block.type === "callout" && <><label>Button text<input maxLength={80} value={block.button_label ?? ""} onChange={event => updateBlock(index, { button_label: event.target.value })} /></label><label>Button link<input maxLength={500} placeholder="/register or https://…" value={block.button_url ?? ""} onChange={event => updateBlock(index, { button_url: event.target.value })} /></label></>}
+      <label className="page-block-color">Background color<input type="color" value={block.background} onChange={event => updateBlock(index, { background: event.target.value })} /><small>{block.background}</small></label>
+    </fieldset>)}
+  </div>;
+}
 
 async function request(path: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers);
@@ -94,7 +148,10 @@ export function AdminDashboard() {
   const [editingEventId, setEditingEventId] = useState<number | null>(null);
   const [eventForm, setEventForm] = useState({ title: "", start_date: "", end_date: "", description: "", sort_order: 0 });
   const [pageCopies, setPageCopies] = useState<PageCopyMap>(defaultPageCopy);
+  const [pageBlocks, setPageBlocks] = useState<Record<string, PageBlock[]>>({});
+  const [pageLayouts, setPageLayouts] = useState<Record<string, Record<string, CopyElementLayout>>>({});
   const [selectedPageSlug, setSelectedPageSlug] = useState("home");
+  const visualFrameRef = useRef<HTMLIFrameElement | null>(null);
 
   async function loadAdmin() {
     const [posts, items, details, policySections, schoolCalendars, mailSettings, contactDetails, applications, savedPageCopies] = await Promise.all([
@@ -109,6 +166,8 @@ export function AdminDashboard() {
     setPolicies(policySections);
     setCalendars(schoolCalendars);
     setPageCopies(Object.fromEntries(Object.entries(defaultPageCopy).map(([slug, fields]) => [slug, { ...fields, ...(savedPageCopies[slug] ?? {}) }])));
+    setPageBlocks(Object.fromEntries(Object.keys(defaultPageCopy).map(slug => [slug, Array.isArray(savedPageCopies[slug]?.blocks) ? savedPageCopies[slug].blocks : []])));
+    setPageLayouts(Object.fromEntries(Object.keys(defaultPageCopy).map(slug => [slug, savedPageCopies[slug]?.element_layouts && typeof savedPageCopies[slug].element_layouts === "object" ? savedPageCopies[slug].element_layouts : {}])));
     setSelectedCalendarId((current: number | null) => current && schoolCalendars.some((calendar: AcademicCalendar) => calendar.id === current) ? current : schoolCalendars.find((calendar: AcademicCalendar) => calendar.is_current)?.id ?? schoolCalendars[0]?.id ?? null);
   }
 
@@ -117,6 +176,61 @@ export function AdminDashboard() {
   }, []);
 
   useEffect(() => { setTab(adminTabFromPath(pathname)); }, [pathname]);
+
+  useEffect(() => {
+    function receiveVisualEdit(event: MessageEvent) {
+      if (event.origin !== window.location.origin || event.source !== visualFrameRef.current?.contentWindow || event.data?.source !== "mna-visual-editor") return;
+      const message = event.data;
+      const page = message.page;
+      if (typeof page !== "string" || !defaultPageCopy[page]) return;
+      if (message.type === "copy-change" && typeof message.field === "string" && typeof message.value === "string") {
+        setPageCopies(current => {
+          const copy = { ...current[page], [message.field]: message.value };
+          visualFrameRef.current?.contentWindow?.postMessage({ source: "mna-admin", type: "replace-page-copy", page, copy }, window.location.origin);
+          return { ...current, [page]: copy };
+        });
+      }
+      if (message.type === "copy-layout-change" && typeof message.field === "string" && message.layout && typeof message.layout === "object") {
+        setPageLayouts(current => {
+          const layouts = { ...current[page], [message.field]: message.layout as CopyElementLayout };
+          visualFrameRef.current?.contentWindow?.postMessage({ source: "mna-admin", type: "replace-page-layouts", page, layouts }, window.location.origin);
+          return { ...current, [page]: layouts };
+        });
+      }
+      if (message.type === "block-update" && typeof message.blockId === "string" && message.patch && typeof message.patch === "object") {
+        setPageBlocks(current => {
+          const blocks = (current[page] ?? []).map(block => block.id === message.blockId ? { ...block, ...message.patch as Partial<PageBlock> } : block);
+          return { ...current, [page]: blocks };
+        });
+      }
+      if (message.type === "block-order" && Array.isArray(message.ids)) {
+        setPageBlocks(current => {
+          const currentBlocks = current[page] ?? [];
+          const blocks = (message.ids as string[]).map(id => currentBlocks.find(block => block.id === id)).filter((block): block is PageBlock => Boolean(block));
+          visualFrameRef.current?.contentWindow?.postMessage({ source: "mna-admin", type: "replace-page-blocks", page, blocks }, window.location.origin);
+          return { ...current, [page]: blocks };
+        });
+      }
+      if (message.type === "delete-block" && typeof message.blockId === "string") {
+        setPageBlocks(current => {
+          const blocks = (current[page] ?? []).filter(block => block.id !== message.blockId);
+          visualFrameRef.current?.contentWindow?.postMessage({ source: "mna-admin", type: "replace-page-blocks", page, blocks }, window.location.origin);
+          return { ...current, [page]: blocks };
+        });
+      }
+      if (message.type === "add-block" && ["text", "image", "video", "callout"].includes(message.blockType)) {
+        const type = message.blockType as PageBlockType;
+        const block: PageBlock = { id: crypto.randomUUID(), type, heading: "", body: "", background: "#fffefa", layout: type === "image" || type === "video" ? "image-left" : type === "callout" ? "centered" : "standard" };
+        setPageBlocks(current => {
+          const blocks = [...(current[page] ?? []), block];
+          visualFrameRef.current?.contentWindow?.postMessage({ source: "mna-admin", type: "replace-page-blocks", page, blocks }, window.location.origin);
+          return { ...current, [page]: blocks };
+        });
+      }
+    }
+    window.addEventListener("message", receiveVisualEdit);
+    return () => window.removeEventListener("message", receiveVisualEdit);
+  }, []);
 
   function navigateTab(nextTab: AdminTab) {
     setTab(nextTab);
@@ -237,8 +351,8 @@ export function AdminDashboard() {
   async function savePageCopy(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setError(""); setNotice("");
     try {
-      const saved = await request(`/api/admin/page-content/${selectedPageSlug}`, { method: "PUT", body: JSON.stringify({ content: pageCopies[selectedPageSlug] }) });
-      setPageCopies(current => ({ ...current, [selectedPageSlug]: { ...current[selectedPageSlug], ...saved.content } }));
+      const saved = await request(`/api/admin/page-content/${selectedPageSlug}`, { method: "PUT", body: JSON.stringify({ content: { ...pageCopies[selectedPageSlug], blocks: pageBlocks[selectedPageSlug] ?? [], element_layouts: pageLayouts[selectedPageSlug] ?? {} } }) }) as { content: { blocks?: PageBlock[] } };
+      setPageBlocks(current => ({ ...current, [selectedPageSlug]: saved.content.blocks ?? [] }));
       setNotice(`${editablePages.find(page => page.slug === selectedPageSlug)?.label ?? "Page"} content saved and published.`);
     } catch (err) { setError(err instanceof Error ? err.message : "Could not save page content."); }
   }
@@ -353,13 +467,17 @@ export function AdminDashboard() {
     {error && <p className="form-error" role="alert">{error}</p>}{notice && <p className="form-success" role="status">{notice}</p>}
     <nav className="admin-tabs" aria-label="Admin sections"><button type="button" className={tab === "news" ? "active" : ""} aria-current={tab === "news" ? "page" : undefined} onClick={() => navigateTab("news")}>News</button><button type="button" className={tab === "media" ? "active" : ""} aria-current={tab === "media" ? "page" : undefined} onClick={() => navigateTab("media")}>Photos & videos</button><button type="button" className={tab === "policies" ? "active" : ""} aria-current={tab === "policies" ? "page" : undefined} onClick={() => navigateTab("policies")}>Policies</button><button type="button" className={tab === "calendar" ? "active" : ""} aria-current={tab === "calendar" ? "page" : undefined} onClick={() => navigateTab("calendar")}>Calendar</button><button type="button" className={tab === "pages" ? "active" : ""} aria-current={tab === "pages" ? "page" : undefined} onClick={() => navigateTab("pages")}>Pages</button><button type="button" className={tab === "details" ? "active" : ""} aria-current={tab === "details" ? "page" : undefined} onClick={() => navigateTab("details")}>Hours & tuition</button><button type="button" className={tab === "contacts" ? "active" : ""} aria-current={tab === "contacts" ? "page" : undefined} onClick={() => navigateTab("contacts")}>Contacts</button><button type="button" className={tab === "applications" ? "active" : ""} aria-current={tab === "applications" ? "page" : undefined} onClick={() => navigateTab("applications")}>Applications</button><button type="button" className={tab === "email" ? "active" : ""} aria-current={tab === "email" ? "page" : undefined} onClick={() => navigateTab("email")}>Email</button></nav>
 
-    {tab === "pages" && <div className="admin-details"><div><h2>Edit page copy</h2><p>Choose a page, edit its headings and main text, then save to publish the changes. A line break in headline fields separates the regular line from the emphasized final line.</p>
-      <form className="admin-form" onSubmit={savePageCopy}>
-        <label>Website page<select value={selectedPageSlug} onChange={event => setSelectedPageSlug(event.target.value)}>{editablePages.map(page => <option key={page.slug} value={page.slug}>{page.label}</option>)}</select></label>
-        {editablePages.find(page => page.slug === selectedPageSlug)?.fields.map(field => <label key={field.key}>{field.label}{field.multiline ? <textarea rows={4} maxLength={20000} value={pageCopies[selectedPageSlug]?.[field.key] ?? ""} onChange={event => setPageCopies(current => ({ ...current, [selectedPageSlug]: { ...current[selectedPageSlug], [field.key]: event.target.value } }))} /> : <input maxLength={20000} value={pageCopies[selectedPageSlug]?.[field.key] ?? ""} onChange={event => setPageCopies(current => ({ ...current, [selectedPageSlug]: { ...current[selectedPageSlug], [field.key]: event.target.value } }))} />}</label>)}
-        <div className="admin-actions"><button className="button">Save page content</button><a className="admin-secondary" href={selectedPageSlug === "home" ? "/" : `/${selectedPageSlug}`} target="_blank" rel="noreferrer">Preview published page</a></div>
+    {tab === "pages" && <section className="visual-page-editor">
+      <div className="visual-page-heading"><div><h2>Edit on the page</h2><p>Click highlighted copy to edit it. Use ⠿ and ↘ handles to move or resize existing copy and added block content. Your edits stay unsaved until you choose Save.</p></div><label>Page<select value={selectedPageSlug} onChange={event => setSelectedPageSlug(event.target.value)}>{editablePages.map(page => <option key={page.slug} value={page.slug}>{page.label}</option>)}</select></label></div>
+      <div className="visual-page-frame-wrap"><iframe key={selectedPageSlug} ref={visualFrameRef} className="visual-page-frame" src={`${selectedPageSlug === "home" ? "/" : `/${selectedPageSlug}`}?visualEdit=1&page=${selectedPageSlug}`} title={`${editablePages.find(page => page.slug === selectedPageSlug)?.label ?? "Website"} visual editor`} /></div>
+      <form className="admin-form visual-page-save" onSubmit={savePageCopy}><div className="admin-actions"><button className="button">Save visual changes</button><a className="admin-secondary" href={selectedPageSlug === "home" ? "/" : `/${selectedPageSlug}`} target="_blank" rel="noreferrer">Open published page</a></div>
+        <details className="visual-page-advanced"><summary>Advanced content fields and section list</summary>
+          <p>Use these controls for precise text entry and detailed block settings. A headline line break separates the regular line from the emphasized final line.</p>
+          {editablePages.find(page => page.slug === selectedPageSlug)?.fields.map(field => <label key={field.key}>{field.label}{field.multiline ? <textarea rows={4} maxLength={20000} value={pageCopies[selectedPageSlug]?.[field.key] ?? ""} onChange={event => setPageCopies(current => ({ ...current, [selectedPageSlug]: { ...current[selectedPageSlug], [field.key]: event.target.value } }))} /> : <input maxLength={20000} value={pageCopies[selectedPageSlug]?.[field.key] ?? ""} onChange={event => setPageCopies(current => ({ ...current, [selectedPageSlug]: { ...current[selectedPageSlug], [field.key]: event.target.value } }))} />}</label>)}
+          <PageBlockEditor blocks={pageBlocks[selectedPageSlug] ?? []} onChange={blocks => setPageBlocks(current => ({ ...current, [selectedPageSlug]: blocks }))} />
+        </details>
       </form>
-    </div><aside><strong>Layout and tools stay protected.</strong><p>This editor controls the page headings and copy. Registration forms, maps, calendars, contact data, photos, and policy lists keep their dedicated admin editors.</p></aside></div>}
+    </section>}
 
     {tab === "applications" && <div className="applications-admin">
       <div className="admin-policy-heading"><div><h2>Registration applications</h2><p>Private family information is visible only to signed-in administrators. Showing the 200 most recent applications.</p></div><button type="button" className="admin-secondary" onClick={refreshRegistrations}>Refresh</button></div>

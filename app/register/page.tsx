@@ -3,7 +3,7 @@ import { PageIntro } from "@/components/page-intro";
 import { RegistrationForm } from "@/components/registration-form";
 import { Sprout } from "lucide-react";
 import { RegistrationContactInfo } from "@/components/contact-details";
-import { PageCopy, PageCopyTitle } from "@/components/page-copy";
+import { PageBlocks, PageCopy, PageCopyTitle } from "@/components/page-copy";
 
 export const metadata: Metadata = { title: "Registration Application" };
 
@@ -18,6 +18,6 @@ export default function RegisterPage() {
         <div className="privacy-note">Health details entered in the application are encrypted in the database and shown only in the signed-in admin area. They are not included in email notifications. Do not enter debit-card, bank-account, or insurance numbers.</div>
       </div>
       <div className="register-card"><h2>Registration application</h2><p>Fields marked <span>*</span> are required.</p><RegistrationForm/></div>
-    </div></section>
+    </div></section><PageBlocks page="register" />
   </>;
 }

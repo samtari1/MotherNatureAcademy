@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { PageIntro } from "@/components/page-intro";
-import { PageCopy, PageCopyTitle } from "@/components/page-copy";
+import { PageBlocks, PageCopy, PageCopyTitle } from "@/components/page-copy";
 import { CampusMedia } from "@/components/campus-media";
 import { CampusMap } from "@/components/campus-map";
 import { Cherry, Boxes, CookingPot, Bird, Blocks, Theater, Sun, Waves, Music, Route, Egg } from "lucide-react";
@@ -42,5 +42,6 @@ export default function CampusPage() {
       <div className="campus-grid">{places.map(([Icon, title, body]: any) => <article key={title}><span><Icon size={20}/></span><div><h3>{title}</h3><p>{body}</p></div></article>)}</div>
     </div></section>
     <section className="callout-band"><div className="container callout-inner"><p>See if the campus feels like a place your child would love.</p><Link className="button" href="/contact">Plan a tour <span>↗</span></Link></div></section>
+    <PageBlocks page="campus" />
   </>;
 }

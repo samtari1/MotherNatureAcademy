@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ArrowUpRight, Leaf, Sun, Footprints, Heart, MapPin, Sparkles } from "lucide-react";
 import { HomeHours } from "@/components/public-site-details";
-import { PageCopy, PageCopyTitle } from "@/components/page-copy";
+import { PageBlocks, PageCopy, PageCopyTitle } from "@/components/page-copy";
 
 export default function HomePage() {
   return <>
@@ -26,5 +26,6 @@ export default function HomePage() {
     <section className="quick-info section-pad"><div className="container quick-grid"><div className="section-label"><span>03</span><span className="label-line" /> A LITTLE PRACTICAL INFO</div><div className="quick-detail"><span className="quick-kicker">OUR MORNING</span><h2><PageCopyTitle page="home" field="quick_title" fallback="Good days start\nat 9 o’clock." /></h2><HomeHours /><Link className="text-link" href="/hours">Hours & tuition <span>↗</span></Link></div><div className="quick-cta"><MapPin size={22}/><p><PageCopy page="home" field="quick_cta" /></p><Link className="button" href="/register">Start a conversation <ArrowUpRight size={16}/></Link></div></div></section>
 
     <section className="closing-cta"><div className="container closing-inner"><span className="closing-flower">✳</span><p><PageCopy page="home" field="closing_tagline" /></p><h2><PageCopyTitle page="home" field="closing_title" fallback="Let’s find your\nchild’s next trail." /></h2><Link className="button button-cream" href="/register">Ask about enrollment <ArrowUpRight size={17}/></Link></div></section>
+    <PageBlocks page="home" />
   </>;
 }

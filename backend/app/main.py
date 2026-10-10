@@ -12,7 +12,7 @@ import hmac
 import re
 import uuid
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 from urllib.parse import parse_qs, urlencode, urlparse
 from zoneinfo import ZoneInfo
 
@@ -629,15 +629,72 @@ class PolicyInput(BaseModel):
 
 
 class PageContentInput(BaseModel):
-    content: dict[str, str] = Field(max_length=100)
+    content: dict[str, Any] = Field(max_length=101)
 
     @field_validator("content")
     @classmethod
-    def validate_page_text(cls, value: dict[str, str]) -> dict[str, str]:
+    def validate_page_text(cls, value: dict[str, Any]) -> dict[str, Any]:
         for key, text_value in value.items():
+            if key == "element_layouts":
+                if not isinstance(text_value, dict) or len(text_value) > 200:
+                    raise ValueError("Page element layouts have an unsupported format.")
+                for field_name, geometry in text_value.items():
+                    if not re.fullmatch(r"[a-z][a-z0-9_]{0,79}", field_name) or not isinstance(geometry, dict) or set(geometry) not in ({"x", "y", "width", "height"}, {"x", "y", "width", "height", "unit"}):
+                        raise ValueError("Page element position and size are invalid.")
+                    unit = geometry.get("unit")
+                    if unit not in (None, "free"):
+                        raise ValueError("Page element layout unit is unsupported.")
+                    values = [geometry[name] for name in ("x", "y", "width", "height")]
+                    if any(isinstance(number, bool) or not isinstance(number, (int, float)) for number in values):
+                        raise ValueError("Page element position and size must be numbers.")
+                    x, y, width, height = values
+                    valid = (-10000 <= x <= 10000 and -10000 <= y <= 10000 and 40 <= width <= 5000 and 24 <= height <= 3000) if unit == "free" else (0 <= x <= 100 and 0 <= y <= 10000 and 8 <= width <= 100 and 24 <= height <= 2000 and x + width <= 100)
+                    if not valid:
+                        raise ValueError("Page element position or size is outside the allowed range.")
+                continue
+            if key == "blocks":
+                if not isinstance(text_value, list) or len(text_value) > 30:
+                    raise ValueError("A page can have no more than 30 content blocks.")
+                allowed_types = {"text", "image", "video", "callout"}
+                allowed_keys = {"id", "type", "heading", "body", "background", "layout", "element_layout", "image_url", "image_alt", "caption", "video_url", "button_label", "button_url"}
+                for block in text_value:
+                    if not isinstance(block, dict) or set(block) - allowed_keys or block.get("type") not in allowed_types:
+                        raise ValueError("A page block has an unsupported format.")
+                    if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", str(block.get("id", ""))):
+                        raise ValueError("Each page block needs a valid identifier.")
+                    for block_key, block_value in block.items():
+                        if block_key == "element_layout":
+                            continue
+                        if not isinstance(block_value, str) or len(block_value) > 20000:
+                            raise ValueError("Page block fields must be text with at most 20,000 characters.")
+                    if not re.fullmatch(r"#[0-9a-fA-F]{6}", block.get("background", "")):
+                        raise ValueError("Choose a valid six-digit background color.")
+                    if block.get("layout", "standard") not in {"standard", "image-left", "image-right", "centered"}:
+                        raise ValueError("Choose a supported block layout.")
+                    element_layout = block.get("element_layout", {})
+                    if not isinstance(element_layout, dict) or set(element_layout) - {"media", "copy"}:
+                        raise ValueError("Page element layout has an unsupported format.")
+                    for geometry in element_layout.values():
+                        if not isinstance(geometry, dict) or set(geometry) not in ({"x", "y", "width", "height"}, {"x", "y", "width", "height", "unit"}):
+                            raise ValueError("Page element position and size are invalid.")
+                        unit = geometry.get("unit")
+                        if unit not in (None, "free"):
+                            raise ValueError("Page element layout unit is unsupported.")
+                        values = [geometry[name] for name in ("x", "y", "width", "height")]
+                        if any(isinstance(number, bool) or not isinstance(number, (int, float)) for number in values):
+                            raise ValueError("Page element position and size must be numbers.")
+                        x, y, width, height = values
+                        valid = (-10000 <= x <= 10000 and -10000 <= y <= 10000 and 40 <= width <= 5000 and 40 <= height <= 3000) if unit == "free" else (0 <= x <= 100 and 0 <= y <= 10000 and 8 <= width <= 100 and 8 <= height <= 10000 and x + width <= 100)
+                        if not valid:
+                            raise ValueError("Page element position or size is outside the allowed range.")
+                    for url_key in ("image_url", "button_url"):
+                        url_value = block.get(url_key, "")
+                        if url_value and not ((url_value.startswith("/") and not url_value.startswith("//")) or url_value.startswith("https://")):
+                            raise ValueError("Page image and button links must use a site path or HTTPS URL.")
+                continue
             if not re.fullmatch(r"[a-z][a-z0-9_]{0,79}", key):
                 raise ValueError("Page content contains an invalid field name.")
-            if len(text_value) > 20000:
+            if not isinstance(text_value, str) or len(text_value) > 20000:
                 raise ValueError("Page content fields must be 20,000 characters or fewer.")
         return value
 

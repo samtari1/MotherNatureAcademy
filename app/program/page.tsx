@@ -3,7 +3,7 @@ import Link from "next/link";
 import { PageIntro } from "@/components/page-intro";
 import { PodcastPlayer } from "@/components/podcast-player";
 import { ProgramVideo } from "@/components/program-video";
-import { PageCopy, PageCopyTitle } from "@/components/page-copy";
+import { PageBlocks, PageCopy, PageCopyTitle } from "@/components/page-copy";
 import { Leaf, Compass, Hand, Sprout, Search, Users, Footprints } from "lucide-react";
 
 export const metadata: Metadata = { title: "Outdoor Preschool Program" };
@@ -58,5 +58,6 @@ export default function ProgramPage() {
     <ProgramVideo />
     <PodcastPlayer />
     <section className="callout-band"><div className="container callout-inner"><p>Want to see whether our program feels right for your family?</p><div className="program-callout-actions"><Link className="text-link" href="/hours">View hours & tuition <span>↗</span></Link><Link className="button" href="/register">Ask us a question <span>↗</span></Link></div></div></section>
+    <PageBlocks page="program" />
   </>;
 }
