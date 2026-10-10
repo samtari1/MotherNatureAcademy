@@ -63,3 +63,37 @@
 .page-builder-floating-video{padding:0!important;border:0!important;background:transparent!important;box-shadow:none!important}.page-builder-floating-video .page-builder-inner{height:100%}.page-builder-floating-video .page-builder-video-only{position:relative;width:100%;height:100%;margin:0;aspect-ratio:auto;overflow:hidden}.page-builder-floating-video .page-builder-video-only iframe{position:absolute;inset:0;width:100%;height:100%;border:0}.page-builder-floating-video .page-builder-video-placeholder{height:100%;min-height:0;margin:0}.page-builder-floating-video .visual-video-only-controls{top:8px;right:8px;max-width:calc(100% - 16px);display:grid;gap:6px;padding:7px;background:#26382f;color:#fffefa}.page-builder-floating-video .visual-video-only-controls label{display:grid;gap:3px;font:700 10px var(--sans)}.page-builder-floating-video .visual-video-only-controls input{box-sizing:border-box;width:min(260px,calc(100vw - 60px));padding:5px 7px;font:11px var(--sans)}.visual-video-editable{padding:5px!important;border:2px dashed #c76d49!important;background:transparent!important;box-shadow:none!important}
 .page-builder-floating-image .visual-image-upload input[type=file]{box-sizing:border-box;width:min(260px,calc(100vw - 60px));max-width:none;padding:4px;font:10px var(--sans)}.visual-image-upload-status{max-width:260px;color:#fffefa;font:10px/1.4 var(--sans);overflow-wrap:anywhere}
 .page-builder-empty-callout{min-height:72px;padding:24px!important}.page-builder-empty-callout>.page-builder-inner{min-height:24px}
+.page-builder-block figure[data-layout-slot="media"]{position:relative}
+.page-builder-block figure[data-layout-slot="media"]:has(> img.visual-element-selected){outline:2px solid #c76d49;outline-offset:3px}
+.page-builder-block figure[data-layout-slot="media"]:has(> img.visual-element-selected)>img.visual-element-selected{outline:none!important;outline-offset:0!important}
+.page-builder-block figure[data-layout-slot="media"]:has(> img.visual-element-selected)>.visual-element-tools{display:block!important;opacity:1!important;visibility:visible!important}
+.page-builder-block figure[class*="page-builder-image-fit-"]{grid-template: minmax(0,1fr) / minmax(0,1fr);min-width:0;min-height:0;box-sizing:border-box}
+.page-builder-block figure[class*="page-builder-image-fit-"]>img{display:block;min-width:0;min-height:0;width:100%;height:100%;box-sizing:border-box}
+.page-builder-block figure.page-builder-image-fit-none{overflow:visible!important}
+.page-builder-block figure.page-builder-image-fit-none>img{justify-self:center;align-self:center;width:auto;height:auto;max-width:none;max-height:none;object-fit:none!important}
+.page-builder-block.page-builder-floating-image figure.page-builder-image-only{overflow:hidden;grid-template: minmax(0,1fr) / minmax(0,1fr);min-width:0;min-height:0}
+.page-builder-block.page-builder-floating-image figure.page-builder-image-fit-none{overflow:visible}
+.visual-page-editor-expanded{position:fixed;z-index:20000;inset:0;box-sizing:border-box;grid-template-rows:auto minmax(0,1fr) auto;gap:8px;overflow:hidden;padding:10px 14px;background:#fffefa}
+.visual-page-editor-expanded .visual-page-heading{align-items:center;gap:12px;min-width:0}
+.visual-page-editor-expanded .visual-page-heading>div:first-child{flex:0 0 auto}
+.visual-page-editor-expanded .visual-page-heading h2{margin:0;font-size:20px}
+.visual-page-editor-expanded .visual-page-heading p{display:none}
+.visual-page-editor-expanded .visual-preview-controls{flex:1;justify-content:flex-end;align-items:end;gap:8px;min-width:0}
+.visual-page-editor-expanded .visual-preview-controls>label{min-width:130px;width:min(180px,20vw)}
+.visual-page-editor-expanded .visual-preview-controls select{padding:7px 9px}
+.visual-page-editor-expanded .visual-page-frame-wrap{display:flex;justify-content:flex-start;align-items:flex-start;width:100%;height:100%!important;min-height:0;overflow:auto;overscroll-behavior:contain}
+.visual-page-editor-expanded .visual-page-save{display:flex;align-items:center;justify-content:space-between;min-height:40px;gap:8px;padding-top:7px;border-top:1px solid var(--line)}
+.visual-page-editor-expanded .visual-page-save .admin-actions{gap:7px}
+.visual-page-editor-expanded .visual-page-advanced{display:none}
+@media(max-width:760px){.visual-page-editor-expanded{gap:6px;padding:8px}.visual-page-editor-expanded .visual-page-heading{align-items:stretch;flex-direction:column}.visual-page-editor-expanded .visual-page-heading>div:first-child{display:none}.visual-page-editor-expanded .visual-preview-controls{justify-content:flex-start}.visual-page-editor-expanded .visual-preview-controls>label{flex:1 1 120px;width:auto;min-width:0}.visual-page-editor-expanded .visual-preview-custom{flex:1 1 100px}.visual-page-editor-expanded .visual-preview-custom label{min-width:0}.visual-page-editor-expanded .visual-editor-expand{flex:none}}
+
+/* Added page sections form an edge-to-edge grid with one shared seam. */
+.page-builder-sections{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;width:100%;box-sizing:border-box;border:1px solid var(--line);background:var(--line)}
+.page-layout-canvas.visual-section-flow{display:flex;flex-direction:column;align-items:stretch}
+.page-builder-sections>.page-builder-block{box-sizing:border-box;min-width:0;width:100%;margin:0;padding:42px 28px}
+.page-builder-sections>.page-builder-block:not(.page-builder-floating-element):last-child:nth-child(odd){grid-column:1/-1}
+.page-builder-sections>.page-builder-block>.page-builder-inner{display:block;width:100%;max-width:none;margin:0}
+@media(max-width:760px){.page-builder-sections{grid-template-columns:minmax(0,1fr)}.page-builder-sections>.page-builder-block{padding:32px 18px}}
+.page-save-toast{position:fixed;z-index:30000;top:18px;right:18px;display:flex;align-items:center;gap:9px;max-width:calc(100vw - 36px);padding:12px 16px;border:1px solid #8eaa91;border-radius:3px;background:#315643;color:#fffefa;box-shadow:0 6px 22px #1c302744;font:700 13px/1.4 var(--sans);animation:page-save-toast-in .18s ease-out}
+@keyframes page-save-toast-in{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
+@media(prefers-reduced-motion:reduce){.page-save-toast{animation:none}}

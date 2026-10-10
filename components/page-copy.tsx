@@ -7,7 +7,7 @@ export type PageBlockType = "text" | "image" | "video" | "callout";
 export type PageImageFit = "cover" | "contain" | "fill" | "none" | "scale-down";
 export type ElementLayout = { x: number; y: number; width: number; height: number; unit?: "free" };
 export type CopyElementLayout = { x: number; y: number; width: number; height: number; unit?: "free" };
-export type VisualElementStyle = { font_size?: number; color?: string; background_color?: string; background_image?: string; text_align?: "left" | "center" | "right"; font_weight?: "normal" | "500" | "600" | "700"; link_url?: string; link_label?: string; image_url?: string; image_alt?: string; text_content?: string; hidden?: boolean; height?: number; x?: number; y?: number; width?: number };
+export type VisualElementStyle = { font_size?: number; color?: string; background_color?: string; background_image?: string; text_align?: "left" | "center" | "right"; font_weight?: "normal" | "500" | "600" | "700"; link_url?: string; link_label?: string; image_url?: string; image_alt?: string; text_content?: string; hidden?: boolean; order?: number; height?: number; x?: number; y?: number; width?: number };
 export type PageBlock = { id: string; type: PageBlockType; heading: string; body: string; background: string; layout?: "standard" | "image-left" | "image-right" | "centered"; parent_id?: string; floating_position?: { x: number; y: number; width: number; height: number }; element_layout?: Record<string, ElementLayout>; image_url?: string; image_alt?: string; image_fit?: PageImageFit; caption?: string; video_url?: string; button_label?: string; button_url?: string };
 export type PageField = { key: string; label: string; multiline?: boolean };
 export type EditablePage = { slug: string; label: string; fields: PageField[] };
@@ -105,6 +105,12 @@ function applyFreeCopyLayout(element: HTMLElement, canvas: HTMLElement, layout: 
 }
 
 function visualElementKey(element: HTMLElement, root: HTMLElement) {
+  const blockId = element.closest<HTMLElement>("[data-page-block-id]")?.dataset.pageBlockId;
+  if (blockId && element === element.closest<HTMLElement>("[data-page-block-id]")) return `block:${blockId}`;
+  if (element.tagName === "SECTION" && element.parentElement === root) {
+    const classes = Array.from(element.classList).sort().join(".");
+    return `section:${classes || "untitled"}`;
+  }
   const copyKey = element.closest<HTMLElement>("[data-copy-element]")?.dataset.copyElement;
   if (copyKey) return `copy:${copyKey}`;
   const parts: string[] = [];
@@ -132,6 +138,12 @@ function directTextContent(element: HTMLElement) {
   return Array.from(element.childNodes).filter(node => node.nodeType === Node.TEXT_NODE).map(node => node.textContent ?? "").join("").trim();
 }
 
+function isPageBlockMediaImage(element: HTMLElement) {
+  if (!(element instanceof HTMLImageElement)) return false;
+  const slot = element.closest<HTMLElement>('[data-layout-slot="media"]');
+  return Boolean(slot?.contains(element) && element.closest("[data-page-block-id]"));
+}
+
 function setDirectTextContent(element: HTMLElement, value: string) {
   const nodes = Array.from(element.childNodes).filter(node => node.nodeType === Node.TEXT_NODE);
   if (nodes.length) {
@@ -142,6 +154,7 @@ function setDirectTextContent(element: HTMLElement, value: string) {
 }
 
 function applyVisualElementStyle(element: HTMLElement, values: VisualElementStyle) {
+    if (typeof values.order === "number") element.style.order = String(values.order);
   if (typeof values.font_size === "number") element.style.fontSize = `${values.font_size}px`;
   if (typeof values.height === "number") element.style.height = `${values.height}px`;
   if (typeof values.hidden === "boolean") element.style.display = values.hidden ? "none" : "";
@@ -149,7 +162,7 @@ function applyVisualElementStyle(element: HTMLElement, values: VisualElementStyl
   if (values.background_color) element.style.backgroundColor = values.background_color;
   if (values.background_image) element.style.backgroundImage = `url(${JSON.stringify(values.background_image)})`;
   if (values.background_image === "") element.style.backgroundImage = "none";
-  if (typeof values.x === "number" && typeof values.y === "number" && typeof values.width === "number" && typeof values.height === "number") {
+  if (element.tagName !== "SECTION" && typeof values.x === "number" && typeof values.y === "number" && typeof values.width === "number" && typeof values.height === "number") {
     const canvas = element.closest<HTMLElement>("main.page-layout-canvas");
     const parent = element.offsetParent instanceof HTMLElement ? element.offsetParent : element.parentElement;
     if (canvas && parent) {
@@ -231,8 +244,15 @@ export function PageCopyProvider({ children }: { children: ReactNode }) {
     if (!root) return;
     const activeRoot = root;
     const page = visualPageSlug();
+    const hasSavedSectionOrder = Object.values(visualElements[page] ?? {}).some(values => typeof values.order === "number");
+    root.classList.toggle("visual-section-flow", hasSavedSectionOrder);
     const applySaved = () => root.querySelectorAll<HTMLElement>("*").forEach(element => {
       if (element.closest(".visual-edit-toolbar,.visual-property-panel,.visual-copy-tools,.visual-element-tools,.visual-block-controls")) return;
+      // Page-builder images are controlled by their media slot. Older visual
+      // editor saves may also contain x/y/width/height for the nested <img>,
+      // which competes with the slot layout and makes the selection frame
+      // drift away from the rendered image.
+      if (isPageBlockMediaImage(element)) return;
       const values = visualElements[page]?.[visualElementKey(element, root)];
       if (values) applyVisualElementStyle(element, values);
     });
@@ -328,6 +348,9 @@ function VisualElementInspector({ valueMap, setValueMap }: { valueMap: Record<st
     const activeCanvas = canvas;
     const root = document.querySelector<HTMLElement>("main.page-layout-canvas");
     if (!root) return;
+    // Images inside a page block are positioned by the figure/media slot.
+    // Its own ⠿/↘ controls are the single source of geometry.
+    if (isPageBlockMediaImage(image)) return;
     const key = keyRef.current;
     const saved = valueMapRef.current[pageRef.current]?.[key] ?? {};
     const startRect = image.getBoundingClientRect();
@@ -379,6 +402,40 @@ function VisualElementInspector({ valueMap, setValueMap }: { valueMap: Record<st
     function drag(event: PointerEvent, mode: "move" | "resize") {
       event.preventDefault();
       event.stopPropagation();
+      const movableSection = image.tagName === "SECTION" ? image : image === findVisualCallout(image) ? findVisualSection(image) : null;
+      if (mode === "move" && movableSection?.parentElement === activeCanvas) {
+        activeCanvas.classList.add("visual-section-flow");
+        const children = Array.from(activeCanvas.children).filter((child): child is HTMLElement => child instanceof HTMLElement);
+        children.forEach((child, index) => { if (!child.style.order) child.style.order = String(index); });
+        function applySectionOrder(pointer: PointerEvent) {
+          const ordered = Array.from(activeCanvas.children).filter((child): child is HTMLElement => child instanceof HTMLElement).sort((a, b) => Number(a.style.order || 0) - Number(b.style.order || 0));
+          const rest = ordered.filter(child => child !== movableSection);
+          const insertionIndex = rest.findIndex(child => pointer.clientY < child.getBoundingClientRect().top + child.getBoundingClientRect().height / 2);
+          rest.splice(insertionIndex < 0 ? rest.length : insertionIndex, 0, movableSection);
+          rest.forEach((child, index) => { child.style.order = String(index); });
+          syncHandles();
+        }
+        function onMove(pointer: PointerEvent) { applySectionOrder(pointer); }
+        function onUp() {
+          window.removeEventListener("pointermove", onMove);
+          window.removeEventListener("pointerup", onUp);
+          const ordered = Array.from(activeCanvas.children).filter((child): child is HTMLElement => child instanceof HTMLElement).sort((a, b) => Number(a.style.order || 0) - Number(b.style.order || 0));
+          const items = ordered.map((child, order) => ({ key: visualElementKey(child, activeCanvas), order }));
+          setValueMap(current => {
+            const elements = { ...current[pageRef.current] };
+            for (const item of items) {
+              const values = { ...elements[item.key], order: item.order };
+              delete values.x; delete values.y; delete values.width;
+              elements[item.key] = values;
+            }
+            return { ...current, [pageRef.current]: elements };
+          });
+          postVisualEdit({ type: "visual-sections-reorder", page: pageRef.current, items });
+        }
+        window.addEventListener("pointermove", onMove);
+        window.addEventListener("pointerup", onUp, { once: true });
+        return;
+      }
       const startX = event.clientX;
       const startY = event.clientY;
       const origin = { ...geometry };
@@ -427,7 +484,7 @@ function VisualElementInspector({ valueMap, setValueMap }: { valueMap: Record<st
     if (deleteButton) {
       deleteButton.type = "button";
       deleteButton.className = "visual-delete-callout";
-      deleteButton.textContent = "Delete callout";
+      deleteButton.textContent = "Delete section";
     }
     const handle = document.createElement("div");
     handle.className = "visual-section-resize-handle";
@@ -439,7 +496,7 @@ function VisualElementInspector({ valueMap, setValueMap }: { valueMap: Record<st
     target.appendChild(controls);
     target.appendChild(handle);
     function onDelete() {
-      if (!calloutTarget || !window.confirm("Delete this callout from the page? Save the page to publish this change.")) return;
+      if (!calloutTarget || !window.confirm("Delete this section from the page? Save the page to publish this change.")) return;
       const blockId = target.closest<HTMLElement>("[data-page-block-id]")?.dataset.pageBlockId;
       if (blockId) {
         postVisualEdit({ type: "delete-block", page: pageRef.current, blockId });
@@ -506,7 +563,7 @@ function VisualElementInspector({ valueMap, setValueMap }: { valueMap: Record<st
   const canEditText = !isImage && !(selected instanceof HTMLImageElement) && (directTextContent(selected).length > 0 || selected.childElementCount === 0);
   const isCallout = Boolean(calloutTarget);
   function deleteCallout() {
-    if (!calloutTarget || !window.confirm("Delete this callout from the page? Save the page to publish this change.")) return;
+    if (!calloutTarget || !window.confirm("Delete this section from the page? Save the page to publish this change.")) return;
     const blockId = calloutTarget.closest<HTMLElement>("[data-page-block-id]")?.dataset.pageBlockId;
     if (blockId) {
       postVisualEdit({ type: "delete-block", page: pageRef.current, blockId });
@@ -524,9 +581,20 @@ function VisualElementInspector({ valueMap, setValueMap }: { valueMap: Record<st
     setSelected(null);
   }
   function deleteSelectedElement() {
-    if (!selected || !window.confirm("Hide this element from the page? Save visual changes to publish the removal.")) return;
+    if (!selected) return;
     const root = document.querySelector<HTMLElement>("main.page-layout-canvas");
     if (!root) return;
+    if (imageBlock) {
+      if (!window.confirm("Remove this image and its empty frame from the page? Save the page to publish the change.")) return;
+      const key = visualElementKey(selected, root);
+      postVisualEdit({ type: "visual-element-remove", page: pageRef.current, key });
+      postVisualEdit({ type: "delete-block", page: pageRef.current, blockId: imageBlock.id });
+      selected.classList.remove("visual-element-selected");
+      selectedRef.current = null;
+      setSelected(null);
+      return;
+    }
+    if (!window.confirm("Hide this element from the page? Save visual changes to publish the removal.")) return;
     const key = visualElementKey(selected, root);
     selected.dataset.visualKey = key;
     applyVisualElementStyle(selected, { hidden: true });
@@ -560,7 +628,7 @@ function VisualElementInspector({ valueMap, setValueMap }: { valueMap: Record<st
     }
   }
   return <aside className="visual-property-panel" data-visual-ui>
-    <div className="visual-property-heading"><div><strong>Selected element</strong><small>{imageBlock ? "image · page element" : `${selected.tagName.toLowerCase()} · ${selected.dataset.visualLabel ?? selected.dataset.copyElement ?? "page content"}`}</small></div><div className="visual-property-actions">{isCallout && <button type="button" className="visual-delete-callout" onClick={deleteCallout}>Delete callout</button>}<button type="button" className="visual-panel-close" aria-label="Close element settings" title="Close settings" onClick={() => { selected.classList.remove("visual-element-selected"); selectedRef.current = null; setSelected(null); }}>×</button></div></div>
+    <div className="visual-property-heading"><div><strong>Selected element</strong><small>{imageBlock ? "image · page element" : `${selected.tagName.toLowerCase()} · ${selected.dataset.visualLabel ?? selected.dataset.copyElement ?? "page content"}`}</small></div><div className="visual-property-actions">{isCallout && <button type="button" className="visual-delete-callout" onClick={deleteCallout}>Delete section</button>}<button type="button" className="visual-panel-close" aria-label="Close element settings" title="Close settings" onClick={() => { selected.classList.remove("visual-element-selected"); selectedRef.current = null; setSelected(null); }}>×</button></div></div>
     {!isImage && <details className="visual-settings-group" open><summary>Typography</summary><div className="visual-property-row"><label>Size<input type="number" min="8" max="120" value={values.font_size ?? 16} onChange={event => update("font_size", Math.max(8, Math.min(120, Number(event.target.value) || 16)))} /></label><label>Weight<select value={values.font_weight ?? "normal"} onChange={event => update("font_weight", event.target.value as VisualElementStyle["font_weight"])}><option value="normal">Regular</option><option value="500">Medium</option><option value="600">Semibold</option><option value="700">Bold</option></select></label></div><div className="visual-property-row"><label>Text color<input type="color" value={colorInputValue(values.color ?? "#26382f")} onChange={event => update("color", event.target.value)} /></label><label>Alignment<select value={values.text_align ?? "left"} onChange={event => update("text_align", event.target.value as VisualElementStyle["text_align"])}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label></div></details>}
     {canEditText && <details className="visual-settings-group" open><summary>Text</summary><label>Content<textarea rows={4} maxLength={20000} value={values.text_content ?? ""} onChange={event => update("text_content", event.target.value)} /></label></details>}
     <details className="visual-settings-group"><summary>Background</summary><label>Color<input type="color" value={colorInputValue(values.background_color ?? "#ffffff")} onChange={event => update("background_color", event.target.value)} /></label></details>
@@ -629,7 +697,7 @@ function VisualCopyElement({ page, field, children, className }: { page: string;
 
 function VisualEditToolbar() {
   const [open, setOpen] = useState(false);
-  return <aside className="visual-edit-toolbar"><button type="button" className="visual-add-toggle" aria-label="Add content" aria-expanded={open} onClick={() => setOpen(value => !value)}>＋</button>{open && <div className="visual-add-menu"><strong>Add to page</strong><span>New text, image, and video items start in the center. Drag them into place when ready.</span>{(["text", "image", "video", "callout"] as PageBlockType[]).map(type => <button type="button" key={type} onClick={() => { const canvas = document.querySelector<HTMLElement>("main.page-layout-canvas"); const bounds = canvas?.getBoundingClientRect(); const size = type === "video" ? { width: 420, height: 250 } : type === "image" ? { width: 360, height: 230 } : type === "text" ? { width: 340, height: 64 } : { width: 340, height: 170 }; const position = type !== "callout" && bounds ? { x: Math.max(12, (bounds.width - size.width) / 2), y: Math.max(12, window.scrollY + (window.innerHeight - size.height) / 2 - bounds.top), ...size } : undefined; postVisualEdit({ type: "add-block", page: new URLSearchParams(window.location.search).get("page") || window.location.pathname.split("/").filter(Boolean).pop() || "home", blockType: type, ...(position ? { floatingPosition: position } : {}) }); setOpen(false); }}>＋ {type}</button>)}</div>}</aside>;
+  return <aside className="visual-edit-toolbar"><button type="button" className="visual-add-toggle" aria-label="Add content" aria-expanded={open} onClick={() => setOpen(value => !value)}>＋</button>{open && <div className="visual-add-menu"><strong>Add to page</strong><span>New text, image, and video items start in the center. Drag them into place when ready.</span>{(["text", "image", "video", "callout"] as PageBlockType[]).map(type => <button type="button" key={type} onClick={() => { const canvas = document.querySelector<HTMLElement>("main.page-layout-canvas"); const bounds = canvas?.getBoundingClientRect(); const size = type === "video" ? { width: 420, height: 250 } : type === "image" ? { width: 360, height: 230 } : type === "text" ? { width: 340, height: 64 } : { width: 340, height: 170 }; const position = type !== "callout" && bounds ? { x: Math.max(12, (bounds.width - size.width) / 2), y: Math.max(12, window.scrollY + (window.innerHeight - size.height) / 2 - bounds.top), ...size } : undefined; postVisualEdit({ type: "add-block", page: new URLSearchParams(window.location.search).get("page") || window.location.pathname.split("/").filter(Boolean).pop() || "home", blockType: type, ...(position ? { floatingPosition: position } : {}) }); setOpen(false); }}>{type === "callout" ? "＋ Section" : `＋ ${type[0].toUpperCase()}${type.slice(1)}`}</button>)}</div>}</aside>;
 }
 
 export function PageCopy({ page, field, fallback, className }: { page: string; field: string; fallback?: string; className?: string }) {
@@ -699,8 +767,13 @@ export function PageBlocks({ page }: { page: string }) {
     const from = next.findIndex(item => item.id === draggedBlockId);
     const to = next.findIndex(item => item.id === targetId);
     if (from < 0 || to < 0) return;
+    const targetElement = event.currentTarget;
+    const targetBounds = targetElement.getBoundingClientRect();
+    const insertAfter = event.clientY >= targetBounds.top + targetBounds.height / 2;
+    let insertionIndex = to + (insertAfter ? 1 : 0);
     const [moving] = next.splice(from, 1);
-    next.splice(to, 0, moving);
+    if (from < insertionIndex) insertionIndex -= 1;
+    next.splice(insertionIndex, 0, moving);
     setDraggedBlockId(null);
     postVisualEdit({ type: "block-order", page, ids: next.map(item => item.id) });
   }
@@ -768,10 +841,10 @@ export function PageBlocks({ page }: { page: string }) {
         next.width = Math.max(40, Math.min(5000, initial.width + dx));
         next.height = Math.max(40, Math.min(3000, initial.height + dy));
       }
-      activeTarget.style.left = `${next.x}%`;
-      activeTarget.style.top = `${next.y}%`;
-      activeTarget.style.width = `${next.width}%`;
-      activeTarget.style.height = `${next.height}%`;
+      activeTarget.style.left = `${next.x}px`;
+      activeTarget.style.top = `${next.y}px`;
+      activeTarget.style.width = `${next.width}px`;
+      activeTarget.style.height = `${next.height}px`;
       layouts[slot] = next;
     }
     function onUp() {
@@ -790,7 +863,7 @@ export function PageBlocks({ page }: { page: string }) {
       {block.type === "video" && embedUrl && <div className="page-builder-video"><iframe src={embedUrl} title={block.heading || "Mother Nature Academy video"} allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerPolicy="strict-origin-when-cross-origin" allowFullScreen /></div>}
       {(block.heading || block.body || visualEdit) && <div className="page-builder-nested-copy"><h3 contentEditable={visualEdit} suppressContentEditableWarning onBlur={event => visualEdit && updateBlock(block.id, { heading: event.currentTarget.innerText })}>{block.heading || (visualEdit ? "Click to add a heading" : "")}</h3><p contentEditable={visualEdit} suppressContentEditableWarning onBlur={event => visualEdit && updateBlock(block.id, { body: event.currentTarget.innerText })}>{block.body || (visualEdit ? "Click to add text" : "")}</p></div>}
       </>}
-      {visualEdit && <div className="visual-nested-controls">{block.type === "image" && <><label>Image URL<input value={block.image_url ?? ""} onChange={event => updateBlock(block.id, { image_url: event.target.value })} /></label><label>Display style<select value={block.image_fit ?? "cover"} onChange={event => updateBlock(block.id, { image_fit: event.target.value as PageBlock["image_fit"] })}>{imageFitOptions.map(option => <option value={option.value} key={option.value}>{option.label}</option>)}</select></label></>}{block.type === "video" && <label>YouTube URL<input value={block.video_url ?? ""} onChange={event => updateBlock(block.id, { video_url: event.target.value })} /></label>}<button type="button" draggable onDragStart={() => setDraggedBlockId(block.id)} onDragEnd={() => setDraggedBlockId(null)} title="Drag this element onto another callout to move it">⠿ Move to another callout</button><button type="button" onClick={() => { if (window.confirm("Remove this element from the callout? Save the page to publish the change.")) postVisualEdit({ type: "delete-block", page, blockId: block.id }); }}>Remove element</button></div>}
+      {visualEdit && <div className="visual-nested-controls">{block.type === "image" && <><label>Image URL<input value={block.image_url ?? ""} onChange={event => updateBlock(block.id, { image_url: event.target.value })} /></label><label>Display style<select value={block.image_fit ?? "cover"} onChange={event => updateBlock(block.id, { image_fit: event.target.value as PageBlock["image_fit"] })}>{imageFitOptions.map(option => <option value={option.value} key={option.value}>{option.label}</option>)}</select></label></>}{block.type === "video" && <label>YouTube URL<input value={block.video_url ?? ""} onChange={event => updateBlock(block.id, { video_url: event.target.value })} /></label>}<button type="button" draggable onDragStart={() => setDraggedBlockId(block.id)} onDragEnd={() => setDraggedBlockId(null)} title="Drag this element onto another section to move it">⠿ Move to another section</button><button type="button" onClick={() => { if (window.confirm("Remove this element from the section? Save the page to publish the change.")) postVisualEdit({ type: "delete-block", page, blockId: block.id }); }}>Remove element</button></div>}
     </article>;
   }
   return <div className="page-builder-sections">{blocks.filter(block => !block.parent_id).map(block => {
@@ -832,7 +905,7 @@ export function PageBlocks({ page }: { page: string }) {
       </div>
       {block.type === "callout" && blocks.some(child => child.parent_id === block.id) && <div className="page-builder-nested-elements">{blocks.filter(child => child.parent_id === block.id).map(renderNestedBlock)}</div>}
       {visualEdit && floatingVideo && <div className="visual-block-controls visual-video-only-controls" contentEditable={false}><label>YouTube URL<input value={block.video_url ?? ""} onChange={event => updateBlock(block.id, { video_url: event.target.value })} /></label></div>}
-      {visualEdit && !floatingText && !floatingImage && !floatingVideo && <div className="visual-block-controls" contentEditable={false}><label title="Change section background">Background<input type="color" value={background} onChange={event => { const color = event.target.value; const section = event.currentTarget.closest(".page-builder-block"); if (section instanceof HTMLElement) { section.style.backgroundColor = color; section.style.color = readableTextColor(color); } updateBlock(block.id, { background: color }); }} /></label>{block.type === "image" && <><label>Image URL<input value={block.image_url ?? ""} onChange={event => updateBlock(block.id, { image_url: event.target.value })} /></label><label>Alt text<input value={block.image_alt ?? ""} onChange={event => updateBlock(block.id, { image_alt: event.target.value })} /></label><label>Display style<select value={block.image_fit ?? "cover"} onChange={event => updateBlock(block.id, { image_fit: event.target.value as PageBlock["image_fit"] })}>{imageFitOptions.map(option => <option value={option.value} key={option.value}>{option.label}</option>)}</select></label></>}{block.type === "video" && <label>YouTube URL<input value={block.video_url ?? ""} onChange={event => updateBlock(block.id, { video_url: event.target.value })} /></label>}<button type="button" draggable onDragStart={() => setDraggedBlockId(block.id)} onDragEnd={() => setDraggedBlockId(null)} title="Drag this handle onto another section to reorder">⠿ Drag section</button><button type="button" onClick={() => { if (window.confirm(`Delete this ${block.type === "callout" ? "callout" : "section"} from the page? Save the page to publish this change.`)) postVisualEdit({ type: "delete-block", page, blockId: block.id }); }}>{block.type === "callout" ? "Delete callout" : "Remove section"}</button><span>Use ⠿ and ↘ handles to move or resize content.</span></div>}
+      {visualEdit && !floatingText && !floatingImage && !floatingVideo && <div className="visual-block-controls" contentEditable={false}><label title="Change section background">Background<input type="color" value={background} onChange={event => { const color = event.target.value; const section = event.currentTarget.closest(".page-builder-block"); if (section instanceof HTMLElement) { section.style.backgroundColor = color; section.style.color = readableTextColor(color); } updateBlock(block.id, { background: color }); }} /></label>{block.type === "image" && <><label>Image URL<input value={block.image_url ?? ""} onChange={event => updateBlock(block.id, { image_url: event.target.value })} /></label><label>Alt text<input value={block.image_alt ?? ""} onChange={event => updateBlock(block.id, { image_alt: event.target.value })} /></label><label>Display style<select value={block.image_fit ?? "cover"} onChange={event => updateBlock(block.id, { image_fit: event.target.value as PageBlock["image_fit"] })}>{imageFitOptions.map(option => <option value={option.value} key={option.value}>{option.label}</option>)}</select></label></>}{block.type === "video" && <label>YouTube URL<input value={block.video_url ?? ""} onChange={event => updateBlock(block.id, { video_url: event.target.value })} /></label>}<button type="button" draggable onDragStart={() => setDraggedBlockId(block.id)} onDragEnd={() => setDraggedBlockId(null)} title="Drag this handle onto another section to reorder">⠿ Drag section</button><button type="button" onClick={() => { if (window.confirm("Delete this section from the page? Save the page to publish this change.")) postVisualEdit({ type: "delete-block", page, blockId: block.id }); }}>{block.type === "callout" ? "Delete section" : "Remove section"}</button><span>Use ⠿ and ↘ handles to move or resize content.</span></div>}
     </section>;
   })}</div>;
 }

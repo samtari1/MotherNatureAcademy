@@ -638,7 +638,7 @@ class PageContentInput(BaseModel):
             if key == "visual_elements":
                 if not isinstance(text_value, dict) or len(text_value) > 1000:
                     raise ValueError("Visual element settings have an unsupported format.")
-                allowed_style_keys = {"font_size", "color", "background_color", "background_image", "text_align", "font_weight", "link_url", "link_label", "image_url", "image_alt", "text_content", "x", "y", "width", "height", "hidden"}
+                allowed_style_keys = {"font_size", "color", "background_color", "background_image", "text_align", "font_weight", "link_url", "link_label", "image_url", "image_alt", "text_content", "x", "y", "width", "height", "hidden", "order"}
                 for element_key, settings in text_value.items():
                     if not isinstance(element_key, str) or not element_key or len(element_key) > 500 or not isinstance(settings, dict) or set(settings) - allowed_style_keys:
                         raise ValueError("A visual element setting has an unsupported format.")
@@ -646,6 +646,8 @@ class PageContentInput(BaseModel):
                         raise ValueError("Font sizes must be between 8 and 120 pixels.")
                     if "hidden" in settings and not isinstance(settings["hidden"], bool):
                         raise ValueError("Element visibility must be true or false.")
+                    if "order" in settings and (isinstance(settings["order"], bool) or not isinstance(settings["order"], int) or not 0 <= settings["order"] <= 10000):
+                        raise ValueError("Section order must be a valid whole number.")
                     for geometry_key in ("x", "y", "width", "height"):
                         if geometry_key in settings and (isinstance(settings[geometry_key], bool) or not isinstance(settings[geometry_key], (int, float)) or not -10000 <= settings[geometry_key] <= 10000):
                             raise ValueError("Image positions and dimensions must be valid pixel values.")
@@ -657,7 +659,7 @@ class PageContentInput(BaseModel):
                     if settings.get("text_align") not in (None, "left", "center", "right") or settings.get("font_weight") not in (None, "normal", "500", "600", "700"):
                         raise ValueError("Choose a supported text alignment and font weight.")
                     for text_key, text_value_inner in settings.items():
-                        if text_key in {"font_size", "color", "background_color", "text_align", "font_weight", "x", "y", "width", "height"}:
+                        if text_key in {"font_size", "color", "background_color", "text_align", "font_weight", "x", "y", "width", "height", "hidden", "order"}:
                             continue
                         max_length = 4000 if text_key in {"background_image", "image_url", "link_url"} else 20000
                         if not isinstance(text_value_inner, str) or len(text_value_inner) > max_length:
