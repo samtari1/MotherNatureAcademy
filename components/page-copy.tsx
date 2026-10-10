@@ -192,9 +192,22 @@ function VisualElementInspector({ valueMap, setValueMap }: { valueMap: Record<st
     const activeRoot = root;
     function selectElement(event: MouseEvent) {
       const target = event.target instanceof HTMLElement ? event.target : null;
-      if (!target || target.closest(".visual-edit-toolbar,.visual-property-panel,.visual-copy-tools,.visual-element-tools,.visual-block-controls,input,textarea,select")) return;
+      if (!target) return;
+      if (target.closest(".visual-edit-toolbar,.visual-property-panel,.visual-copy-tools,.visual-element-tools,.visual-block-controls,input,textarea,select")) return;
+      const clearSelection = () => {
+        selectedRef.current?.classList.remove("visual-element-selected");
+        selectedRef.current = null;
+        setSelected(null);
+      };
+      if (!activeRoot.contains(target) || target === activeRoot) {
+        clearSelection();
+        return;
+      }
       const element = target.closest<HTMLElement>("a,button,img") ?? target.closest<HTMLElement>("main.page-layout-canvas *");
-      if (!element || element === activeRoot || ["SCRIPT", "STYLE", "SVG", "PATH", "IFRAME"].includes(element.tagName)) return;
+      if (!element || element === activeRoot || ["SCRIPT", "STYLE", "SVG", "PATH", "IFRAME"].includes(element.tagName)) {
+        clearSelection();
+        return;
+      }
       if (element instanceof HTMLAnchorElement || element instanceof HTMLButtonElement) {
         event.preventDefault();
         event.stopPropagation();
@@ -223,8 +236,8 @@ function VisualElementInspector({ valueMap, setValueMap }: { valueMap: Record<st
         ...(element instanceof HTMLImageElement ? { image_url: saved.image_url ?? element.getAttribute("src") ?? "", image_alt: saved.image_alt ?? element.alt } : {}),
       });
     }
-    root.addEventListener("click", selectElement, true);
-    return () => { root.removeEventListener("click", selectElement, true); selectedRef.current?.classList.remove("visual-element-selected"); };
+    document.addEventListener("click", selectElement, true);
+    return () => { document.removeEventListener("click", selectElement, true); selectedRef.current?.classList.remove("visual-element-selected"); };
   }, []);
   function update<K extends keyof VisualElementStyle>(key: K, value: VisualElementStyle[K]) {
     if (!selected) return;
@@ -239,16 +252,15 @@ function VisualElementInspector({ valueMap, setValueMap }: { valueMap: Record<st
   const isAnchor = selected instanceof HTMLAnchorElement;
   const isImage = selected instanceof HTMLImageElement;
   const isButton = selected instanceof HTMLButtonElement;
+  const sectionId = selected.closest<HTMLElement>("[data-page-block-id]")?.dataset.pageBlockId;
   return <aside className="visual-property-panel" data-visual-ui>
     <div className="visual-property-heading"><div><strong>Selected element</strong><small>{selected.tagName.toLowerCase()} · {selected.dataset.visualLabel ?? selected.dataset.copyElement ?? "page content"}</small></div><button type="button" aria-label="Close element settings" onClick={() => { selected.classList.remove("visual-element-selected"); setSelected(null); }}>×</button></div>
-    <label>Font size<input type="number" min="8" max="120" value={values.font_size ?? 16} onChange={event => update("font_size", Math.max(8, Math.min(120, Number(event.target.value) || 16)))} /></label>
-    <label>Text color<input type="color" value={colorInputValue(values.color ?? "#26382f")} onChange={event => update("color", event.target.value)} /></label>
-    <label>Background color<input type="color" value={colorInputValue(values.background_color ?? "#ffffff")} onChange={event => update("background_color", event.target.value)} /></label>
-    <label>Background image URL<input type="url" placeholder="https://… or /media/…" value={values.background_image ?? ""} onChange={event => update("background_image", event.target.value)} /></label>
-    <div className="visual-property-row"><label>Alignment<select value={values.text_align ?? "left"} onChange={event => update("text_align", event.target.value as VisualElementStyle["text_align"])}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label><label>Weight<select value={values.font_weight ?? "normal"} onChange={event => update("font_weight", event.target.value as VisualElementStyle["font_weight"])}><option value="normal">Regular</option><option value="500">Medium</option><option value="600">Semibold</option><option value="700">Bold</option></select></label></div>
-    {(isAnchor || isButton) && <>{isAnchor && <label>Link destination<input value={values.link_url ?? ""} onChange={event => update("link_url", event.target.value)} /></label>}<label>{isAnchor ? "Link label" : "Button label"}<input value={values.link_label ?? ""} onChange={event => update("link_label", event.target.value)} /></label></>}
-    {isImage && <><label>Image URL<input value={values.image_url ?? ""} onChange={event => update("image_url", event.target.value)} /></label><label>Alternative text<input value={values.image_alt ?? ""} onChange={event => update("image_alt", event.target.value)} /></label></>}
-    <p>Changes are saved when you select <b>Save visual changes</b>.</p>
+    <details className="visual-settings-group" open><summary>Typography</summary><div className="visual-property-row"><label>Size<input type="number" min="8" max="120" value={values.font_size ?? 16} onChange={event => update("font_size", Math.max(8, Math.min(120, Number(event.target.value) || 16)))} /></label><label>Weight<select value={values.font_weight ?? "normal"} onChange={event => update("font_weight", event.target.value as VisualElementStyle["font_weight"])}><option value="normal">Regular</option><option value="500">Medium</option><option value="600">Semibold</option><option value="700">Bold</option></select></label></div><div className="visual-property-row"><label>Text color<input type="color" value={colorInputValue(values.color ?? "#26382f")} onChange={event => update("color", event.target.value)} /></label><label>Alignment<select value={values.text_align ?? "left"} onChange={event => update("text_align", event.target.value as VisualElementStyle["text_align"])}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label></div></details>
+    <details className="visual-settings-group"><summary>Background</summary><label>Color<input type="color" value={colorInputValue(values.background_color ?? "#ffffff")} onChange={event => update("background_color", event.target.value)} /></label><label>Image URL<input type="url" placeholder="https://… or /media/…" value={values.background_image ?? ""} onChange={event => update("background_image", event.target.value)} /></label></details>
+    {(isAnchor || isButton) && <details className="visual-settings-group"><summary>{isAnchor ? "Link" : "Button"}</summary>{isAnchor && <label>Destination<input value={values.link_url ?? ""} onChange={event => update("link_url", event.target.value)} /></label>}<label>Label<input value={values.link_label ?? ""} onChange={event => update("link_label", event.target.value)} /></label></details>}
+    {isImage && <details className="visual-settings-group"><summary>Image</summary><label>Image URL<input value={values.image_url ?? ""} onChange={event => update("image_url", event.target.value)} /></label><label>Alternative text<input value={values.image_alt ?? ""} onChange={event => update("image_alt", event.target.value)} /></label></details>}
+    {sectionId && <button type="button" className="visual-remove-section" onClick={() => { if (!window.confirm("Delete this section from the page? Save the page to publish this change.")) return; postVisualEdit({ type: "delete-block", page: pageRef.current, blockId: sectionId }); selected.classList.remove("visual-element-selected"); selectedRef.current = null; setSelected(null); }}>Delete section</button>}
+    <p>Changes publish when saved in the admin page.</p>
   </aside>;
 }
 
@@ -313,7 +325,8 @@ function VisualCopyElement({ page, field, children, className }: { page: string;
 }
 
 function VisualEditToolbar() {
-  return <aside className="visual-edit-toolbar"><strong>Visual editing</strong><span>Use ⠿ to move existing copy freely across the page and ↘ to resize it. Drag added content with its section handle.</span><div>{(["text", "image", "video", "callout"] as PageBlockType[]).map(type => <button type="button" key={type} onClick={() => postVisualEdit({ type: "add-block", page: new URLSearchParams(window.location.search).get("page") || window.location.pathname.split("/").filter(Boolean).pop() || "home", blockType: type })}>+ {type}</button>)}</div><small>Save changes in the admin window.</small></aside>;
+  const [open, setOpen] = useState(false);
+  return <aside className="visual-edit-toolbar"><button type="button" className="visual-add-toggle" aria-label="Add content" aria-expanded={open} onClick={() => setOpen(value => !value)}>＋</button>{open && <div className="visual-add-menu"><strong>Add to page</strong><span>Choose a content block to insert.</span>{(["text", "image", "video", "callout"] as PageBlockType[]).map(type => <button type="button" key={type} onClick={() => { postVisualEdit({ type: "add-block", page: new URLSearchParams(window.location.search).get("page") || window.location.pathname.split("/").filter(Boolean).pop() || "home", blockType: type }); setOpen(false); }}>＋ {type}</button>)}</div>}</aside>;
 }
 
 export function PageCopy({ page, field, fallback, className }: { page: string; field: string; fallback?: string; className?: string }) {
@@ -442,7 +455,7 @@ export function PageBlocks({ page }: { page: string }) {
       return item ? { position: "absolute" as const, left: item.unit === "free" ? `${item.x}px` : `${item.x}%`, top: item.unit === "free" ? `${item.y}px` : `${item.y}%`, width: item.unit === "free" ? `${item.width}px` : `${item.width}%`, height: item.unit === "free" ? `${item.height}px` : `${item.height}%`, zIndex: 2 } : undefined;
     };
     const tools = (slot: string) => visualEdit && <div className="visual-element-tools" contentEditable={false}><button type="button" title="Drag to move this element" aria-label="Move element" onPointerDown={event => beginElementAdjust(event, block, slot, "move")}>⠿</button><button type="button" className="visual-element-resize" title="Drag to resize this element" aria-label="Resize element" onPointerDown={event => beginElementAdjust(event, block, slot, "resize")}>↘</button></div>;
-    return <section className={`page-builder-block page-builder-${block.type} page-builder-layout-${layout}${positioned ? " page-builder-custom-layout" : ""}${draggedBlockId === block.id ? " visual-block-dragging" : ""}`} key={block.id} style={{ backgroundColor: background, color: readableTextColor(background) }} onDragOver={event => visualEdit && event.preventDefault()} onDrop={event => visualEdit && reorderBlocks(event, block.id)}>
+    return <section data-page-block-id={block.id} className={`page-builder-block page-builder-${block.type} page-builder-layout-${layout}${positioned ? " page-builder-custom-layout" : ""}${draggedBlockId === block.id ? " visual-block-dragging" : ""}`} key={block.id} style={{ backgroundColor: background, color: readableTextColor(background) }} onDragOver={event => visualEdit && event.preventDefault()} onDrop={event => visualEdit && reorderBlocks(event, block.id)}>
       <div className={`container page-builder-inner${positioned ? " page-builder-positioned" : ""}`}>
         {block.type === "image" && block.image_url && <figure data-layout-slot="media" style={slotStyle("media")}><img src={block.image_url} alt={block.image_alt ?? ""} />{(block.caption || visualEdit) && <figcaption contentEditable={visualEdit} suppressContentEditableWarning onBlur={event => visualEdit && updateBlock(block.id, { caption: event.currentTarget.innerText })} data-visual-label="image caption">{block.caption || (visualEdit ? "Click to add a caption" : "")}</figcaption>}{tools("media")}</figure>}
         {block.type === "video" && embedUrl && <div className="page-builder-video" data-layout-slot="media" style={slotStyle("media")}><iframe src={embedUrl} title={block.heading || "Mother Nature Academy video"} allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerPolicy="strict-origin-when-cross-origin" allowFullScreen />{tools("media")}</div>}

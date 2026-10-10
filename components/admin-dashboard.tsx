@@ -158,6 +158,7 @@ export function AdminDashboard() {
   const [previewScale, setPreviewScale] = useState(1);
   const visualFrameRef = useRef<HTMLIFrameElement | null>(null);
   const visualFrameWrapRef = useRef<HTMLDivElement | null>(null);
+  const refreshPreviewScaleRef = useRef<() => void>(() => {});
   const previewSizes: Record<string, { width: number; height: number }> = { desktop: { width: 1440, height: 900 }, laptop: { width: 1280, height: 800 }, tablet: { width: 768, height: 1024 }, mobile: { width: 390, height: 844 } };
 
   async function loadAdmin() {
@@ -188,11 +189,18 @@ export function AdminDashboard() {
   useEffect(() => {
     if (!signedIn || tab !== "pages" || !visualFrameWrapRef.current) return;
     const wrapper = visualFrameWrapRef.current;
-    const updateScale = () => setPreviewScale(Math.min(1, wrapper.clientWidth / previewWidth));
+    const editor = wrapper.parentElement;
+    const updateScale = () => {
+      const visibleWidth = Math.min(wrapper.clientWidth, editor?.clientWidth ?? wrapper.clientWidth, window.innerWidth - wrapper.getBoundingClientRect().left - 24);
+      setPreviewScale(Math.max(0.25, Math.min(1, (visibleWidth - 24) / previewWidth)));
+    };
+    refreshPreviewScaleRef.current = updateScale;
     const observer = new ResizeObserver(updateScale);
     observer.observe(wrapper);
+    if (editor) observer.observe(editor);
+    window.addEventListener("resize", updateScale);
     updateScale();
-    return () => observer.disconnect();
+    return () => { observer.disconnect(); window.removeEventListener("resize", updateScale); refreshPreviewScaleRef.current = () => {}; };
   }, [signedIn, tab, previewWidth]);
 
   useEffect(() => {
@@ -490,7 +498,7 @@ export function AdminDashboard() {
 
     {tab === "pages" && <section className="visual-page-editor">
       <div className="visual-page-heading"><div><h2>Edit on the page</h2><p>Preview at a visitor’s viewport size. Select text, a button, image, or section to edit its styling and links. Use the handles to move or resize. Save to publish your changes.</p></div><div className="visual-preview-controls"><label>Page<select value={selectedPageSlug} onChange={event => setSelectedPageSlug(event.target.value)}>{editablePages.map(page => <option key={page.slug} value={page.slug}>{page.label}</option>)}</select></label><label>Visitor viewport<select value={previewPreset} onChange={event => { const preset = event.target.value; setPreviewPreset(preset); if (previewSizes[preset]) { setPreviewWidth(previewSizes[preset].width); setPreviewHeight(previewSizes[preset].height); } }}>{Object.entries(previewSizes).map(([key, size]) => <option key={key} value={key}>{key[0].toUpperCase() + key.slice(1)} · {size.width} × {size.height}</option>)}<option value="custom">Custom size</option></select></label>{previewPreset === "custom" && <div className="visual-preview-custom"><label>Width<input aria-label="Preview width in pixels" type="number" min="320" max="2560" value={previewWidth} onChange={event => setPreviewWidth(Math.max(320, Math.min(2560, Number(event.target.value) || 320)))} /></label><label>Height<input aria-label="Preview height in pixels" type="number" min="480" max="1800" value={previewHeight} onChange={event => setPreviewHeight(Math.max(480, Math.min(1800, Number(event.target.value) || 480)))} /></label></div>}</div></div>
-      <div ref={visualFrameWrapRef} className="visual-page-frame-wrap" style={{ height: `${previewHeight * previewScale}px` }}><iframe key={selectedPageSlug} ref={visualFrameRef} className="visual-page-frame" style={{ width: `${previewWidth}px`, height: `${previewHeight}px`, minHeight: 0, transform: `scale(${previewScale})`, transformOrigin: "top left" }} src={`${selectedPageSlug === "home" ? "/" : `/${selectedPageSlug}`}?visualEdit=1&page=${selectedPageSlug}`} title={`${editablePages.find(page => page.slug === selectedPageSlug)?.label ?? "Website"} visual editor`} /></div>
+      <div ref={visualFrameWrapRef} className="visual-page-frame-wrap" style={{ height: `${previewHeight * previewScale}px` }}><iframe key={selectedPageSlug} ref={visualFrameRef} className="visual-page-frame" style={{ width: `${previewWidth}px`, height: `${previewHeight}px`, minHeight: 0, transform: `scale(${previewScale})`, transformOrigin: "top left" }} onLoad={() => { requestAnimationFrame(() => requestAnimationFrame(() => refreshPreviewScaleRef.current())); }} src={`${selectedPageSlug === "home" ? "/" : `/${selectedPageSlug}`}?visualEdit=1&page=${selectedPageSlug}`} title={`${editablePages.find(page => page.slug === selectedPageSlug)?.label ?? "Website"} visual editor`} /></div>
       <form className="admin-form visual-page-save" onSubmit={savePageCopy}><div className="admin-actions"><button className="button">Save visual changes</button><a className="admin-secondary" href={selectedPageSlug === "home" ? "/" : `/${selectedPageSlug}`} target="_blank" rel="noreferrer">Open published page</a></div>
         <details className="visual-page-advanced"><summary>Advanced content fields and section list</summary>
           <p>Use these controls for precise text entry and detailed block settings. A headline line break separates the regular line from the emphasized final line.</p>
