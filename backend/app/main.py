@@ -659,8 +659,9 @@ class PageContentInput(BaseModel):
                     for text_key, text_value_inner in settings.items():
                         if text_key in {"font_size", "color", "background_color", "text_align", "font_weight", "x", "y", "width", "height"}:
                             continue
-                        if not isinstance(text_value_inner, str) or len(text_value_inner) > 4000:
-                            raise ValueError("Visual element text and URLs must be 4,000 characters or fewer.")
+                        max_length = 4000 if text_key in {"background_image", "image_url", "link_url"} else 20000
+                        if not isinstance(text_value_inner, str) or len(text_value_inner) > max_length:
+                            raise ValueError(f"Visual element {text_key.replace('_', ' ')} must be {max_length:,} characters or fewer.")
                     for url_key in ("background_image", "image_url"):
                         url_value = settings.get(url_key, "")
                         if url_value and not ((url_value.startswith("/") and not url_value.startswith("//")) or url_value.startswith("https://")):

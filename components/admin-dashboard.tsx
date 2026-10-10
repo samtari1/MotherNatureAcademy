@@ -91,7 +91,15 @@ async function request(path: string, init: RequestInit = {}) {
   if (!(init.body instanceof FormData) && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   const response = await fetch(apiUrl(path), { ...init, credentials: "include", headers });
   const result = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(result.detail || "The request could not be completed.");
+  if (!response.ok) {
+    const detail = Array.isArray(result.detail)
+      ? result.detail.map((issue: { loc?: unknown[]; msg?: unknown }) => {
+          const location = Array.isArray(issue?.loc) ? issue.loc.filter(part => part !== "body").join(" → ") : "";
+          return `${location ? `${location}: ` : ""}${typeof issue?.msg === "string" ? issue.msg : "Invalid value."}`;
+        }).join("; ")
+      : typeof result.detail === "string" ? result.detail : "The request could not be completed.";
+    throw new Error(detail);
+  }
   return result;
 }
 
@@ -384,6 +392,8 @@ export function AdminDashboard() {
   async function savePageCopy(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setError(""); setNotice("");
     try {
+      const emptyImage = (pageBlocks[selectedPageSlug] ?? []).find(block => block.type === "image" && !block.image_url?.trim());
+      if (emptyImage) throw new Error("An image element on this page has no image yet. Select it in the preview and add an image URL or upload a file, or delete the empty image element.");
       const saved = await request(`/api/admin/page-content/${selectedPageSlug}`, { method: "PUT", body: JSON.stringify({ content: { ...pageCopies[selectedPageSlug], blocks: pageBlocks[selectedPageSlug] ?? [], element_layouts: pageLayouts[selectedPageSlug] ?? {}, visual_elements: pageVisualElements[selectedPageSlug] ?? {} } }) }) as { content: { blocks?: PageBlock[] } };
       setPageBlocks(current => ({ ...current, [selectedPageSlug]: saved.content.blocks ?? [] }));
       setNotice(`${editablePages.find(page => page.slug === selectedPageSlug)?.label ?? "Page"} content saved and published.`);
