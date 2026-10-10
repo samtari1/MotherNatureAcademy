@@ -635,6 +635,33 @@ class PageContentInput(BaseModel):
     @classmethod
     def validate_page_text(cls, value: dict[str, Any]) -> dict[str, Any]:
         for key, text_value in value.items():
+            if key == "visual_elements":
+                if not isinstance(text_value, dict) or len(text_value) > 1000:
+                    raise ValueError("Visual element settings have an unsupported format.")
+                allowed_style_keys = {"font_size", "color", "background_color", "background_image", "text_align", "font_weight", "link_url", "link_label", "image_url", "image_alt"}
+                for element_key, settings in text_value.items():
+                    if not isinstance(element_key, str) or not element_key or len(element_key) > 500 or not isinstance(settings, dict) or set(settings) - allowed_style_keys:
+                        raise ValueError("A visual element setting has an unsupported format.")
+                    if "font_size" in settings and (isinstance(settings["font_size"], bool) or not isinstance(settings["font_size"], (int, float)) or not 8 <= settings["font_size"] <= 120):
+                        raise ValueError("Font sizes must be between 8 and 120 pixels.")
+                    for color_key in ("color", "background_color"):
+                        if color_key in settings and (not isinstance(settings[color_key], str) or not re.fullmatch(r"#[0-9a-fA-F]{6}", settings[color_key])):
+                            raise ValueError("Choose a valid six-digit color.")
+                    if settings.get("text_align") not in (None, "left", "center", "right") or settings.get("font_weight") not in (None, "normal", "500", "600", "700"):
+                        raise ValueError("Choose a supported text alignment and font weight.")
+                    for text_key, text_value_inner in settings.items():
+                        if text_key in {"font_size", "color", "background_color", "text_align", "font_weight"}:
+                            continue
+                        if not isinstance(text_value_inner, str) or len(text_value_inner) > 4000:
+                            raise ValueError("Visual element text and URLs must be 4,000 characters or fewer.")
+                    for url_key in ("background_image", "image_url"):
+                        url_value = settings.get(url_key, "")
+                        if url_value and not ((url_value.startswith("/") and not url_value.startswith("//")) or url_value.startswith("https://")):
+                            raise ValueError("Visual element images must use a site path or HTTPS URL.")
+                    link_url = settings.get("link_url", "")
+                    if link_url and not ((link_url.startswith("/") and not link_url.startswith("//")) or link_url.startswith(("https://", "mailto:", "tel:"))):
+                        raise ValueError("Links must use a site path, HTTPS, email, or telephone address.")
+                continue
             if key == "element_layouts":
                 if not isinstance(text_value, dict) or len(text_value) > 200:
                     raise ValueError("Page element layouts have an unsupported format.")

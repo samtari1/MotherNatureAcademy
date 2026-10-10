@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useRef, useState, type DragEvent } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { initialContactInfo, type ContactInfo } from "@/components/contact-details";
-import { defaultPageCopy, editablePages, type CopyElementLayout, type PageBlock, type PageBlockType, type PageCopyMap } from "@/components/page-copy";
+import { defaultPageCopy, editablePages, type CopyElementLayout, type PageBlock, type PageBlockType, type PageCopyMap, type VisualElementStyle } from "@/components/page-copy";
 
 const apiUrl = (path: string) => path;
 const mediaUrl = (url: string) => url;
@@ -150,11 +150,14 @@ export function AdminDashboard() {
   const [pageCopies, setPageCopies] = useState<PageCopyMap>(defaultPageCopy);
   const [pageBlocks, setPageBlocks] = useState<Record<string, PageBlock[]>>({});
   const [pageLayouts, setPageLayouts] = useState<Record<string, Record<string, CopyElementLayout>>>({});
+  const [pageVisualElements, setPageVisualElements] = useState<Record<string, Record<string, VisualElementStyle>>>({});
   const [selectedPageSlug, setSelectedPageSlug] = useState("home");
   const [previewPreset, setPreviewPreset] = useState("desktop");
   const [previewWidth, setPreviewWidth] = useState(1440);
   const [previewHeight, setPreviewHeight] = useState(900);
+  const [previewScale, setPreviewScale] = useState(1);
   const visualFrameRef = useRef<HTMLIFrameElement | null>(null);
+  const visualFrameWrapRef = useRef<HTMLDivElement | null>(null);
   const previewSizes: Record<string, { width: number; height: number }> = { desktop: { width: 1440, height: 900 }, laptop: { width: 1280, height: 800 }, tablet: { width: 768, height: 1024 }, mobile: { width: 390, height: 844 } };
 
   async function loadAdmin() {
@@ -172,6 +175,7 @@ export function AdminDashboard() {
     setPageCopies(Object.fromEntries(Object.entries(defaultPageCopy).map(([slug, fields]) => [slug, { ...fields, ...(savedPageCopies[slug] ?? {}) }])));
     setPageBlocks(Object.fromEntries(Object.keys(defaultPageCopy).map(slug => [slug, Array.isArray(savedPageCopies[slug]?.blocks) ? savedPageCopies[slug].blocks : []])));
     setPageLayouts(Object.fromEntries(Object.keys(defaultPageCopy).map(slug => [slug, savedPageCopies[slug]?.element_layouts && typeof savedPageCopies[slug].element_layouts === "object" ? savedPageCopies[slug].element_layouts : {}])));
+    setPageVisualElements(Object.fromEntries(Object.keys(defaultPageCopy).map(slug => [slug, savedPageCopies[slug]?.visual_elements && typeof savedPageCopies[slug].visual_elements === "object" ? savedPageCopies[slug].visual_elements : {}])));
     setSelectedCalendarId((current: number | null) => current && schoolCalendars.some((calendar: AcademicCalendar) => calendar.id === current) ? current : schoolCalendars.find((calendar: AcademicCalendar) => calendar.is_current)?.id ?? schoolCalendars[0]?.id ?? null);
   }
 
@@ -180,6 +184,16 @@ export function AdminDashboard() {
   }, []);
 
   useEffect(() => { setTab(adminTabFromPath(pathname)); }, [pathname]);
+
+  useEffect(() => {
+    if (!signedIn || tab !== "pages" || !visualFrameWrapRef.current) return;
+    const wrapper = visualFrameWrapRef.current;
+    const updateScale = () => setPreviewScale(Math.min(1, wrapper.clientWidth / previewWidth));
+    const observer = new ResizeObserver(updateScale);
+    observer.observe(wrapper);
+    updateScale();
+    return () => observer.disconnect();
+  }, [signedIn, tab, previewWidth]);
 
   useEffect(() => {
     function receiveVisualEdit(event: MessageEvent) {
@@ -200,6 +214,9 @@ export function AdminDashboard() {
           visualFrameRef.current?.contentWindow?.postMessage({ source: "mna-admin", type: "replace-page-layouts", page, layouts }, window.location.origin);
           return { ...current, [page]: layouts };
         });
+      }
+      if (message.type === "visual-element-change" && typeof message.key === "string" && message.patch && typeof message.patch === "object") {
+        setPageVisualElements(current => ({ ...current, [page]: { ...current[page], [message.key]: { ...current[page]?.[message.key], ...message.patch as VisualElementStyle } } }));
       }
       if (message.type === "block-update" && typeof message.blockId === "string" && message.patch && typeof message.patch === "object") {
         setPageBlocks(current => {
@@ -355,7 +372,7 @@ export function AdminDashboard() {
   async function savePageCopy(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setError(""); setNotice("");
     try {
-      const saved = await request(`/api/admin/page-content/${selectedPageSlug}`, { method: "PUT", body: JSON.stringify({ content: { ...pageCopies[selectedPageSlug], blocks: pageBlocks[selectedPageSlug] ?? [], element_layouts: pageLayouts[selectedPageSlug] ?? {} } }) }) as { content: { blocks?: PageBlock[] } };
+      const saved = await request(`/api/admin/page-content/${selectedPageSlug}`, { method: "PUT", body: JSON.stringify({ content: { ...pageCopies[selectedPageSlug], blocks: pageBlocks[selectedPageSlug] ?? [], element_layouts: pageLayouts[selectedPageSlug] ?? {}, visual_elements: pageVisualElements[selectedPageSlug] ?? {} } }) }) as { content: { blocks?: PageBlock[] } };
       setPageBlocks(current => ({ ...current, [selectedPageSlug]: saved.content.blocks ?? [] }));
       setNotice(`${editablePages.find(page => page.slug === selectedPageSlug)?.label ?? "Page"} content saved and published.`);
     } catch (err) { setError(err instanceof Error ? err.message : "Could not save page content."); }
@@ -466,14 +483,14 @@ export function AdminDashboard() {
     {error && <p className="form-error" role="alert">{error}</p>}{notice && <p className="form-success" role="status">{notice}</p>}
   </div></section>;
 
-  return <section className="admin-shell"><div className="admin-panel">
+  return <section className="admin-shell admin-shell-wide"><div className="admin-panel admin-panel-wide">
     <div className="admin-heading"><div><span className="eyebrow"><span/> WEBSITE CONTENT</span><h1>Academy admin</h1><p>Updates publish to the public website as soon as you save them.</p></div><button className="admin-secondary" onClick={signOut}>Sign out</button></div>
     {error && <p className="form-error" role="alert">{error}</p>}{notice && <p className="form-success" role="status">{notice}</p>}
     <nav className="admin-tabs" aria-label="Admin sections"><button type="button" className={tab === "news" ? "active" : ""} aria-current={tab === "news" ? "page" : undefined} onClick={() => navigateTab("news")}>News</button><button type="button" className={tab === "media" ? "active" : ""} aria-current={tab === "media" ? "page" : undefined} onClick={() => navigateTab("media")}>Photos & videos</button><button type="button" className={tab === "policies" ? "active" : ""} aria-current={tab === "policies" ? "page" : undefined} onClick={() => navigateTab("policies")}>Policies</button><button type="button" className={tab === "calendar" ? "active" : ""} aria-current={tab === "calendar" ? "page" : undefined} onClick={() => navigateTab("calendar")}>Calendar</button><button type="button" className={tab === "pages" ? "active" : ""} aria-current={tab === "pages" ? "page" : undefined} onClick={() => navigateTab("pages")}>Pages</button><button type="button" className={tab === "details" ? "active" : ""} aria-current={tab === "details" ? "page" : undefined} onClick={() => navigateTab("details")}>Hours & tuition</button><button type="button" className={tab === "contacts" ? "active" : ""} aria-current={tab === "contacts" ? "page" : undefined} onClick={() => navigateTab("contacts")}>Contacts</button><button type="button" className={tab === "applications" ? "active" : ""} aria-current={tab === "applications" ? "page" : undefined} onClick={() => navigateTab("applications")}>Applications</button><button type="button" className={tab === "email" ? "active" : ""} aria-current={tab === "email" ? "page" : undefined} onClick={() => navigateTab("email")}>Email</button></nav>
 
     {tab === "pages" && <section className="visual-page-editor">
-      <div className="visual-page-heading"><div><h2>Edit on the page</h2><p>Preview at a visitor’s viewport size. Click highlighted copy to edit it; use the handles to move or resize it. Your edits stay unsaved until you choose Save.</p></div><div className="visual-preview-controls"><label>Page<select value={selectedPageSlug} onChange={event => setSelectedPageSlug(event.target.value)}>{editablePages.map(page => <option key={page.slug} value={page.slug}>{page.label}</option>)}</select></label><label>Visitor viewport<select value={previewPreset} onChange={event => { const preset = event.target.value; setPreviewPreset(preset); if (previewSizes[preset]) { setPreviewWidth(previewSizes[preset].width); setPreviewHeight(previewSizes[preset].height); } }}>{Object.entries(previewSizes).map(([key, size]) => <option key={key} value={key}>{key[0].toUpperCase() + key.slice(1)} · {size.width} × {size.height}</option>)}<option value="custom">Custom size</option></select></label>{previewPreset === "custom" && <div className="visual-preview-custom"><label>Width<input aria-label="Preview width in pixels" type="number" min="320" max="2560" value={previewWidth} onChange={event => setPreviewWidth(Math.max(320, Math.min(2560, Number(event.target.value) || 320)))} /></label><label>Height<input aria-label="Preview height in pixels" type="number" min="480" max="1800" value={previewHeight} onChange={event => setPreviewHeight(Math.max(480, Math.min(1800, Number(event.target.value) || 480)))} /></label></div>}</div></div>
-      <div className="visual-page-frame-wrap"><iframe key={selectedPageSlug} ref={visualFrameRef} className="visual-page-frame" style={{ width: `${previewWidth}px`, height: `${previewHeight}px`, minHeight: 0 }} src={`${selectedPageSlug === "home" ? "/" : `/${selectedPageSlug}`}?visualEdit=1&page=${selectedPageSlug}`} title={`${editablePages.find(page => page.slug === selectedPageSlug)?.label ?? "Website"} visual editor`} /></div>
+      <div className="visual-page-heading"><div><h2>Edit on the page</h2><p>Preview at a visitor’s viewport size. Select text, a button, image, or section to edit its styling and links. Use the handles to move or resize. Save to publish your changes.</p></div><div className="visual-preview-controls"><label>Page<select value={selectedPageSlug} onChange={event => setSelectedPageSlug(event.target.value)}>{editablePages.map(page => <option key={page.slug} value={page.slug}>{page.label}</option>)}</select></label><label>Visitor viewport<select value={previewPreset} onChange={event => { const preset = event.target.value; setPreviewPreset(preset); if (previewSizes[preset]) { setPreviewWidth(previewSizes[preset].width); setPreviewHeight(previewSizes[preset].height); } }}>{Object.entries(previewSizes).map(([key, size]) => <option key={key} value={key}>{key[0].toUpperCase() + key.slice(1)} · {size.width} × {size.height}</option>)}<option value="custom">Custom size</option></select></label>{previewPreset === "custom" && <div className="visual-preview-custom"><label>Width<input aria-label="Preview width in pixels" type="number" min="320" max="2560" value={previewWidth} onChange={event => setPreviewWidth(Math.max(320, Math.min(2560, Number(event.target.value) || 320)))} /></label><label>Height<input aria-label="Preview height in pixels" type="number" min="480" max="1800" value={previewHeight} onChange={event => setPreviewHeight(Math.max(480, Math.min(1800, Number(event.target.value) || 480)))} /></label></div>}</div></div>
+      <div ref={visualFrameWrapRef} className="visual-page-frame-wrap" style={{ height: `${previewHeight * previewScale}px` }}><iframe key={selectedPageSlug} ref={visualFrameRef} className="visual-page-frame" style={{ width: `${previewWidth}px`, height: `${previewHeight}px`, minHeight: 0, transform: `scale(${previewScale})`, transformOrigin: "top left" }} src={`${selectedPageSlug === "home" ? "/" : `/${selectedPageSlug}`}?visualEdit=1&page=${selectedPageSlug}`} title={`${editablePages.find(page => page.slug === selectedPageSlug)?.label ?? "Website"} visual editor`} /></div>
       <form className="admin-form visual-page-save" onSubmit={savePageCopy}><div className="admin-actions"><button className="button">Save visual changes</button><a className="admin-secondary" href={selectedPageSlug === "home" ? "/" : `/${selectedPageSlug}`} target="_blank" rel="noreferrer">Open published page</a></div>
         <details className="visual-page-advanced"><summary>Advanced content fields and section list</summary>
           <p>Use these controls for precise text entry and detailed block settings. A headline line break separates the regular line from the emphasized final line.</p>

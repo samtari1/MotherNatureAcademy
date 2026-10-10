@@ -6,6 +6,7 @@ export type PageCopyMap = Record<string, Record<string, string>>;
 export type PageBlockType = "text" | "image" | "video" | "callout";
 export type ElementLayout = { x: number; y: number; width: number; height: number; unit?: "free" };
 export type CopyElementLayout = { x: number; y: number; width: number; height: number; unit?: "free" };
+export type VisualElementStyle = { font_size?: number; color?: string; background_color?: string; background_image?: string; text_align?: "left" | "center" | "right"; font_weight?: "normal" | "500" | "600" | "700"; link_url?: string; link_label?: string; image_url?: string; image_alt?: string };
 export type PageBlock = { id: string; type: PageBlockType; heading: string; body: string; background: string; layout?: "standard" | "image-left" | "image-right" | "centered"; element_layout?: Record<string, ElementLayout>; image_url?: string; image_alt?: string; caption?: string; video_url?: string; button_label?: string; button_url?: string };
 export type PageField = { key: string; label: string; multiline?: boolean };
 export type EditablePage = { slug: string; label: string; fields: PageField[] };
@@ -65,6 +66,50 @@ const PageLayoutContext = createContext<{ data: Record<string, Record<string, Co
 const PageBlocksContext = createContext<{ data: Record<string, PageBlock[]>; setData: Dispatch<SetStateAction<Record<string, PageBlock[]>>> }>({ data: {}, setData: () => {} });
 const VisualEditContext = createContext(false);
 
+function visualPageSlug() {
+  return window.location.pathname.split("/").filter(Boolean).pop() || "home";
+}
+
+function visualElementKey(element: HTMLElement, root: HTMLElement) {
+  const copyKey = element.closest<HTMLElement>("[data-copy-element]")?.dataset.copyElement;
+  if (copyKey) return `copy:${copyKey}`;
+  const parts: string[] = [];
+  let current: HTMLElement | null = element;
+  while (current && current !== root) {
+    const tag = current.tagName.toLowerCase();
+    const peers = current.parentElement ? Array.from(current.parentElement.children).filter(peer => peer.tagName === current?.tagName) : [];
+    parts.unshift(`${tag}:${peers.indexOf(current) + 1}`);
+    current = current.parentElement;
+  }
+  return parts.join("/").slice(0, 500);
+}
+
+function visualElementLabel(element: HTMLElement) {
+  const textNode = Array.from(element.childNodes).find(node => node.nodeType === Node.TEXT_NODE && node.textContent?.trim());
+  return textNode?.textContent?.trim() ?? (element.childElementCount === 0 ? element.textContent ?? "" : "");
+}
+
+function applyVisualElementStyle(element: HTMLElement, values: VisualElementStyle) {
+  if (typeof values.font_size === "number") element.style.fontSize = `${values.font_size}px`;
+  if (values.color) element.style.color = values.color;
+  if (values.background_color) element.style.backgroundColor = values.background_color;
+  if (values.background_image) element.style.backgroundImage = `url(${JSON.stringify(values.background_image)})`;
+  if (values.background_image === "") element.style.backgroundImage = "none";
+  if (values.text_align) element.style.textAlign = values.text_align;
+  if (values.font_weight) element.style.fontWeight = values.font_weight;
+  if (element instanceof HTMLAnchorElement && typeof values.link_url === "string") values.link_url ? element.href = values.link_url : element.removeAttribute("href");
+  if (element instanceof HTMLImageElement) {
+    if (values.image_url) element.src = values.image_url;
+    if (typeof values.image_alt === "string") element.alt = values.image_alt;
+  }
+  if ((element instanceof HTMLAnchorElement || element instanceof HTMLButtonElement) && typeof values.link_label === "string") {
+    const textNode = Array.from(element.childNodes).find(node => node.nodeType === Node.TEXT_NODE);
+    if (textNode) textNode.textContent = values.link_label;
+    else if (element.childElementCount === 0) element.textContent = values.link_label;
+    else element.insertBefore(document.createTextNode(values.link_label), element.firstChild);
+  }
+}
+
 function postVisualEdit(message: Record<string, unknown>) {
   if (window.parent !== window) window.parent.postMessage({ source: "mna-visual-editor", ...message }, window.location.origin);
 }
@@ -72,6 +117,7 @@ function postVisualEdit(message: Record<string, unknown>) {
 export function PageCopyProvider({ children }: { children: ReactNode }) {
   const [copy, setCopy] = useState(defaultPageCopy);
   const [layouts, setLayouts] = useState<Record<string, Record<string, CopyElementLayout>>>({});
+  const [visualElements, setVisualElements] = useState<Record<string, Record<string, VisualElementStyle>>>({});
   const [blocks, setBlocks] = useState<Record<string, PageBlock[]>>({});
   const [visualEdit, setVisualEdit] = useState(false);
   useEffect(() => {
@@ -86,6 +132,7 @@ export function PageCopyProvider({ children }: { children: ReactNode }) {
       })));
       setBlocks(Object.fromEntries(Object.entries(saved).map(([page, fields]) => [page, Array.isArray(fields.blocks) ? fields.blocks as PageBlock[] : []])));
       setLayouts(Object.fromEntries(Object.entries(saved).map(([page, fields]) => [page, fields.element_layouts && typeof fields.element_layouts === "object" ? fields.element_layouts as Record<string, CopyElementLayout> : {}])));
+      setVisualElements(Object.fromEntries(Object.entries(saved).map(([page, fields]) => [page, fields.visual_elements && typeof fields.visual_elements === "object" ? fields.visual_elements as Record<string, VisualElementStyle> : {}])));
     }).catch(() => {});
   }, []);
   useLayoutEffect(() => {
@@ -101,11 +148,108 @@ export function PageCopyProvider({ children }: { children: ReactNode }) {
       if (event.data.type === "replace-page-blocks" && Array.isArray(event.data.blocks)) setBlocks(current => ({ ...current, [event.data.page]: event.data.blocks }));
       if (event.data.type === "replace-page-copy" && event.data.copy && typeof event.data.copy === "object") setCopy(current => ({ ...current, [event.data.page]: { ...current[event.data.page], ...event.data.copy } }));
       if (event.data.type === "replace-page-layouts" && event.data.layouts && typeof event.data.layouts === "object") setLayouts(current => ({ ...current, [event.data.page]: event.data.layouts }));
+      if (event.data.type === "replace-visual-elements" && event.data.elements && typeof event.data.elements === "object") setVisualElements(current => ({ ...current, [event.data.page]: event.data.elements }));
     }
     window.addEventListener("message", receive);
     return () => window.removeEventListener("message", receive);
   }, []);
-  return <PageCopyContext.Provider value={copy}><PageLayoutContext.Provider value={{ data: layouts, setData: setLayouts }}><PageBlocksContext.Provider value={{ data: blocks, setData: setBlocks }}><VisualEditContext.Provider value={visualEdit}>{children}{visualEdit && <VisualEditToolbar />}</VisualEditContext.Provider></PageBlocksContext.Provider></PageLayoutContext.Provider></PageCopyContext.Provider>;
+  useEffect(() => {
+    const root = document.querySelector<HTMLElement>("main.page-layout-canvas");
+    if (!root) return;
+    const page = visualPageSlug();
+    const applySaved = () => root.querySelectorAll<HTMLElement>("*").forEach(element => {
+      if (element.closest(".visual-edit-toolbar,.visual-property-panel,.visual-copy-tools,.visual-element-tools,.visual-block-controls")) return;
+      const values = visualElements[page]?.[visualElementKey(element, root)];
+      if (values) applyVisualElementStyle(element, values);
+    });
+    applySaved();
+    const observer = new MutationObserver(applySaved);
+    observer.observe(root, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, [visualElements]);
+  return <PageCopyContext.Provider value={copy}><PageLayoutContext.Provider value={{ data: layouts, setData: setLayouts }}><PageBlocksContext.Provider value={{ data: blocks, setData: setBlocks }}><VisualEditContext.Provider value={visualEdit}>{children}{visualEdit && <><VisualEditToolbar /><VisualElementInspector valueMap={visualElements} setValueMap={setVisualElements} /></>}</VisualEditContext.Provider></PageBlocksContext.Provider></PageLayoutContext.Provider></PageCopyContext.Provider>;
+}
+
+function colorInputValue(value: string) {
+  if (/^#[0-9a-fA-F]{6}$/.test(value)) return value;
+  if (/^rgba\([^)]*,\s*0\)$/.test(value)) return "#ffffff";
+  const rgb = value.match(/\d+/g)?.slice(0, 3).map(channel => Number(channel).toString(16).padStart(2, "0"));
+  return rgb?.length === 3 ? `#${rgb.join("")}` : "#ffffff";
+}
+
+function VisualElementInspector({ valueMap, setValueMap }: { valueMap: Record<string, Record<string, VisualElementStyle>>; setValueMap: Dispatch<SetStateAction<Record<string, Record<string, VisualElementStyle>>>> }) {
+  const [selected, setSelected] = useState<HTMLElement | null>(null);
+  const [values, setValues] = useState<VisualElementStyle>({});
+  const keyRef = useRef("");
+  const pageRef = useRef("");
+  const selectedRef = useRef<HTMLElement | null>(null);
+  const valueMapRef = useRef(valueMap);
+  selectedRef.current = selected;
+  valueMapRef.current = valueMap;
+  useEffect(() => {
+    const root = document.querySelector<HTMLElement>("main.page-layout-canvas");
+    if (!root) return;
+    const activeRoot = root;
+    function selectElement(event: MouseEvent) {
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      if (!target || target.closest(".visual-edit-toolbar,.visual-property-panel,.visual-copy-tools,.visual-element-tools,.visual-block-controls,input,textarea,select")) return;
+      const element = target.closest<HTMLElement>("a,button,img") ?? target.closest<HTMLElement>("main.page-layout-canvas *");
+      if (!element || element === activeRoot || ["SCRIPT", "STYLE", "SVG", "PATH", "IFRAME"].includes(element.tagName)) return;
+      if (element instanceof HTMLAnchorElement || element instanceof HTMLButtonElement) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      selectedRef.current?.classList.remove("visual-element-selected");
+      const page = visualPageSlug();
+      const key = visualElementKey(element, activeRoot);
+      pageRef.current = page; keyRef.current = key;
+      element.dataset.visualKey = key;
+      element.classList.add("visual-element-selected");
+      setSelected(element);
+      const saved = valueMapRef.current[page]?.[key] ?? {};
+      const computed = window.getComputedStyle(element);
+      const backgroundImageMatch = computed.backgroundImage.match(/^url\(["']?(.*?)["']?\)$/);
+      const backgroundImage = saved.background_image ?? backgroundImageMatch?.[1] ?? "";
+      setValues({
+        ...saved,
+        font_size: saved.font_size ?? (Number.parseFloat(computed.fontSize) || 16),
+        color: saved.color ?? colorInputValue(computed.color),
+        background_color: saved.background_color ?? colorInputValue(computed.backgroundColor),
+        background_image: backgroundImage,
+        text_align: saved.text_align ?? (computed.textAlign === "center" || computed.textAlign === "right" ? computed.textAlign : "left"),
+        font_weight: saved.font_weight ?? (["500", "600", "700"].includes(computed.fontWeight) ? computed.fontWeight as VisualElementStyle["font_weight"] : "normal"),
+        ...(element instanceof HTMLAnchorElement ? { link_url: saved.link_url ?? element.getAttribute("href") ?? "", link_label: saved.link_label ?? visualElementLabel(element) } : {}),
+        ...(element instanceof HTMLButtonElement ? { link_label: saved.link_label ?? visualElementLabel(element) } : {}),
+        ...(element instanceof HTMLImageElement ? { image_url: saved.image_url ?? element.getAttribute("src") ?? "", image_alt: saved.image_alt ?? element.alt } : {}),
+      });
+    }
+    root.addEventListener("click", selectElement, true);
+    return () => { root.removeEventListener("click", selectElement, true); selectedRef.current?.classList.remove("visual-element-selected"); };
+  }, []);
+  function update<K extends keyof VisualElementStyle>(key: K, value: VisualElementStyle[K]) {
+    if (!selected) return;
+    const patch = { [key]: value } as Pick<VisualElementStyle, K>;
+    const next = { ...values, ...patch };
+    setValues(next);
+    applyVisualElementStyle(selected, patch);
+    setValueMap(current => ({ ...current, [pageRef.current]: { ...current[pageRef.current], [keyRef.current]: { ...current[pageRef.current]?.[keyRef.current], ...patch } } }));
+    postVisualEdit({ type: "visual-element-change", page: pageRef.current, key: keyRef.current, patch });
+  }
+  if (!selected) return null;
+  const isAnchor = selected instanceof HTMLAnchorElement;
+  const isImage = selected instanceof HTMLImageElement;
+  const isButton = selected instanceof HTMLButtonElement;
+  return <aside className="visual-property-panel" data-visual-ui>
+    <div className="visual-property-heading"><div><strong>Selected element</strong><small>{selected.tagName.toLowerCase()} · {selected.dataset.visualLabel ?? selected.dataset.copyElement ?? "page content"}</small></div><button type="button" aria-label="Close element settings" onClick={() => { selected.classList.remove("visual-element-selected"); setSelected(null); }}>×</button></div>
+    <label>Font size<input type="number" min="8" max="120" value={values.font_size ?? 16} onChange={event => update("font_size", Math.max(8, Math.min(120, Number(event.target.value) || 16)))} /></label>
+    <label>Text color<input type="color" value={colorInputValue(values.color ?? "#26382f")} onChange={event => update("color", event.target.value)} /></label>
+    <label>Background color<input type="color" value={colorInputValue(values.background_color ?? "#ffffff")} onChange={event => update("background_color", event.target.value)} /></label>
+    <label>Background image URL<input type="url" placeholder="https://… or /media/…" value={values.background_image ?? ""} onChange={event => update("background_image", event.target.value)} /></label>
+    <div className="visual-property-row"><label>Alignment<select value={values.text_align ?? "left"} onChange={event => update("text_align", event.target.value as VisualElementStyle["text_align"])}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label><label>Weight<select value={values.font_weight ?? "normal"} onChange={event => update("font_weight", event.target.value as VisualElementStyle["font_weight"])}><option value="normal">Regular</option><option value="500">Medium</option><option value="600">Semibold</option><option value="700">Bold</option></select></label></div>
+    {(isAnchor || isButton) && <>{isAnchor && <label>Link destination<input value={values.link_url ?? ""} onChange={event => update("link_url", event.target.value)} /></label>}<label>{isAnchor ? "Link label" : "Button label"}<input value={values.link_label ?? ""} onChange={event => update("link_label", event.target.value)} /></label></>}
+    {isImage && <><label>Image URL<input value={values.image_url ?? ""} onChange={event => update("image_url", event.target.value)} /></label><label>Alternative text<input value={values.image_alt ?? ""} onChange={event => update("image_alt", event.target.value)} /></label></>}
+    <p>Changes are saved when you select <b>Save visual changes</b>.</p>
+  </aside>;
 }
 
 function VisualCopyElement({ page, field, children, className }: { page: string; field: string; children: ReactNode; className?: string }) {
