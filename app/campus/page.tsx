@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { PageIntro } from "@/components/page-intro";
+import { PageCopy, PageCopyTitle } from "@/components/page-copy";
 import { CampusMedia } from "@/components/campus-media";
 import { CampusMap } from "@/components/campus-map";
 import { Cherry, Boxes, CookingPot, Bird, Blocks, Theater, Sun, Waves, Music, Route, Egg } from "lucide-react";
@@ -23,13 +24,13 @@ const places = [
 
 export default function CampusPage() {
   return <>
-    <PageIntro eyebrow="OUR CAMPUS" title={<>The outdoors is<br/><em>our classroom.</em></>} intro="Our learning spaces sit on a private farm in Carthage, North Carolina, with places to build, pretend, notice, make, and explore." />
+    <PageIntro page="campus" eyebrow="OUR CAMPUS" title="The outdoors is\nour classroom." intro="Our learning spaces sit on a private farm in Carthage, North Carolina, with places to build, pretend, notice, make, and explore." />
     <section className="campus-feature"><div className="container campus-feature-inner">
       <div className="campus-image" role="img" aria-label="Outdoor mud kitchen at Mother Nature Academy" />
       <div className="campus-feature-copy"><div className="eyebrow"><span/> SIX AND A HALF ACRES OF POSSIBILITY</div>
-        <h2>A landscape made<br/>for <em>little explorers.</em></h2>
-        <p>From the nature trail to the mud kitchen, every corner offers a different invitation. Children can follow an idea, find a friend, and turn an ordinary morning into a story of their own.</p>
-        <p className="quiet-note">Campus visits are arranged by appointment. Please contact us to plan a tour.</p>
+        <h2><PageCopyTitle page="campus" field="feature_title" fallback="A landscape made\nfor little explorers." /></h2>
+        <p><PageCopy page="campus" field="feature_body" /></p>
+        <p className="quiet-note"><PageCopy page="campus" field="feature_note" /></p>
         <Link className="button" href="/contact">Arrange a visit <span>↗</span></Link>
       </div>
     </div></section>
@@ -37,7 +38,7 @@ export default function CampusPage() {
     <CampusMedia />
     <section className="campus-list"><div className="container">
       <div className="section-label"><span>02</span><span className="label-line"/> LITTLE PLACES, BIG IDEAS</div>
-      <h2>Some of the places<br/>we <em>love to explore.</em></h2>
+      <h2><PageCopyTitle page="campus" field="places_title" fallback="Some of the places\nwe love to explore." /></h2>
       <div className="campus-grid">{places.map(([Icon, title, body]: any) => <article key={title}><span><Icon size={20}/></span><div><h3>{title}</h3><p>{body}</p></div></article>)}</div>
     </div></section>
     <section className="callout-band"><div className="container callout-inner"><p>See if the campus feels like a place your child would love.</p><Link className="button" href="/contact">Plan a tour <span>↗</span></Link></div></section>

@@ -28,6 +28,7 @@ from starlette.staticfiles import StaticFiles
 from app.admin_security import create_session, verify_password, verify_session
 
 logger = logging.getLogger(__name__)
+EDITABLE_PAGE_SLUGS = {"home", "program", "curriculum", "campus", "contact", "hours", "register", "policies", "calendar", "news"}
 
 
 class Settings(BaseSettings):
@@ -155,6 +156,14 @@ class SiteConfiguration(Base):
     tuition_5_days: Mapped[str] = mapped_column(String(40), nullable=False)
     registration_fee: Mapped[str] = mapped_column(String(40), nullable=False)
     school_year: Mapped[str] = mapped_column(String(40), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
+
+
+class PageContent(Base):
+    __tablename__ = "page_content"
+
+    page_slug: Mapped[str] = mapped_column(String(80), primary_key=True)
+    content_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
 
 
@@ -617,6 +626,20 @@ class PolicyInput(BaseModel):
     body: str = Field(min_length=1, max_length=20000)
     published: bool = True
     sort_order: int = Field(default=0, ge=0, le=10000)
+
+
+class PageContentInput(BaseModel):
+    content: dict[str, str] = Field(max_length=100)
+
+    @field_validator("content")
+    @classmethod
+    def validate_page_text(cls, value: dict[str, str]) -> dict[str, str]:
+        for key, text_value in value.items():
+            if not re.fullmatch(r"[a-z][a-z0-9_]{0,79}", key):
+                raise ValueError("Page content contains an invalid field name.")
+            if len(text_value) > 20000:
+                raise ValueError("Page content fields must be 20,000 characters or fewer.")
+        return value
 
 
 class AcademicCalendarInput(BaseModel):
@@ -1157,6 +1180,37 @@ def get_public_site_content():
         if row is None:
             raise HTTPException(status_code=503, detail="Site content is not ready.")
         return config_to_dict(row)
+
+
+@app.get("/api/page-content")
+def get_public_page_content():
+    with SessionLocal() as db:
+        rows = db.scalars(select(PageContent)).all()
+        return {row.page_slug: json.loads(row.content_json) for row in rows}
+
+
+@app.get("/api/admin/page-content")
+def get_admin_page_content(_: str = Depends(require_admin)):
+    with SessionLocal() as db:
+        rows = db.scalars(select(PageContent)).all()
+        return {row.page_slug: json.loads(row.content_json) for row in rows}
+
+
+@app.put("/api/admin/page-content/{page_slug}")
+def save_admin_page_content(page_slug: str, payload: PageContentInput, _: str = Depends(require_admin)):
+    if page_slug not in EDITABLE_PAGE_SLUGS:
+        raise HTTPException(status_code=404, detail="Page not found.")
+    with SessionLocal() as db:
+        row = db.get(PageContent, page_slug)
+        serialized = json.dumps(payload.content, ensure_ascii=False)
+        if row is None:
+            row = PageContent(page_slug=page_slug, content_json=serialized)
+            db.add(row)
+        else:
+            row.content_json = serialized
+            row.updated_at = datetime.now(timezone.utc)
+        db.commit()
+        return {"page_slug": row.page_slug, "content": json.loads(row.content_json), "updated_at": row.updated_at.isoformat()}
 
 
 @app.get("/api/contact-info")

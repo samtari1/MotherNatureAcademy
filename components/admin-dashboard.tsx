@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { initialContactInfo, type ContactInfo } from "@/components/contact-details";
+import { defaultPageCopy, editablePages, type PageCopyMap } from "@/components/page-copy";
 
 const apiUrl = (path: string) => path;
 const mediaUrl = (url: string) => url;
@@ -17,12 +18,12 @@ type SmtpSettings = { enabled: boolean; smtp_host: string; smtp_port: number; sm
 type RegistrationSummary = { id: number; school_year: string; child_name: string; guardian_name: string; created_at: string; notification_sent: boolean };
 type RegistrationPageTwo = { medical_conditions: string; medications: string; allergies: { allergen: string; reaction: string }[]; immunizations_up_to_date: string; immunization_explanation: string; other_considerations: string; health_information_consent: boolean; admission_policy_initials: string; payment_terms_acknowledged: boolean };
 type RegistrationDetail = RegistrationSummary & { guardian_email: string; child_nickname: string | null; child_age: string; child_date_of_birth: string; lives_with: string; schedule: string; guardian_relationship: string; address: string; city: string; state: string; postal_code: string; home_phone: string | null; cell_phone: string; work_phone: string | null; second_guardian_name: string | null; second_guardian_relationship: string | null; second_guardian_phone: string | null; second_guardian_email: string | null; signature: string; page_two: RegistrationPageTwo; notification_sent_at: string | null };
-type AdminTab = "news" | "media" | "policies" | "calendar" | "details" | "email" | "contacts" | "applications";
+type AdminTab = "news" | "media" | "policies" | "calendar" | "details" | "email" | "contacts" | "applications" | "pages";
 
-const adminTabRoutes: Record<AdminTab, string> = { news: "news", media: "media", policies: "policies", calendar: "calendar", details: "hours", contacts: "contacts", email: "email", applications: "applications" };
+const adminTabRoutes: Record<AdminTab, string> = { news: "news", media: "media", policies: "policies", calendar: "calendar", details: "hours", contacts: "contacts", email: "email", applications: "applications", pages: "pages" };
 function adminTabFromPath(pathname: string): AdminTab {
   const section = pathname.split("/").filter(Boolean)[1];
-  if (section === "media" || section === "policies" || section === "calendar" || section === "contacts" || section === "email" || section === "applications") return section;
+  if (section === "media" || section === "policies" || section === "calendar" || section === "contacts" || section === "email" || section === "applications" || section === "pages") return section;
   if (section === "hours") return "details";
   return "news";
 }
@@ -92,10 +93,12 @@ export function AdminDashboard() {
   const [calendarForm, setCalendarForm] = useState({ school_year: "", title: "", notes: "", is_current: false, published: false });
   const [editingEventId, setEditingEventId] = useState<number | null>(null);
   const [eventForm, setEventForm] = useState({ title: "", start_date: "", end_date: "", description: "", sort_order: 0 });
+  const [pageCopies, setPageCopies] = useState<PageCopyMap>(defaultPageCopy);
+  const [selectedPageSlug, setSelectedPageSlug] = useState("home");
 
   async function loadAdmin() {
-    const [posts, items, details, policySections, schoolCalendars, mailSettings, contactDetails, applications] = await Promise.all([
-      request("/api/admin/news"), request("/api/admin/media"), request("/api/admin/site-content"), request("/api/admin/policies"), request("/api/admin/calendars"), request("/api/admin/smtp-settings"), request("/api/admin/contact-info"), request("/api/admin/registrations"),
+    const [posts, items, details, policySections, schoolCalendars, mailSettings, contactDetails, applications, savedPageCopies] = await Promise.all([
+      request("/api/admin/news"), request("/api/admin/media"), request("/api/admin/site-content"), request("/api/admin/policies"), request("/api/admin/calendars"), request("/api/admin/smtp-settings"), request("/api/admin/contact-info"), request("/api/admin/registrations"), request("/api/admin/page-content"),
     ]);
     setNews(posts);
     setRegistrations(applications);
@@ -105,6 +108,7 @@ export function AdminDashboard() {
     setSmtpSettings({ ...mailSettings, smtp_password: "" });
     setPolicies(policySections);
     setCalendars(schoolCalendars);
+    setPageCopies(Object.fromEntries(Object.entries(defaultPageCopy).map(([slug, fields]) => [slug, { ...fields, ...(savedPageCopies[slug] ?? {}) }])));
     setSelectedCalendarId((current: number | null) => current && schoolCalendars.some((calendar: AcademicCalendar) => calendar.id === current) ? current : schoolCalendars.find((calendar: AcademicCalendar) => calendar.is_current)?.id ?? schoolCalendars[0]?.id ?? null);
   }
 
@@ -230,6 +234,15 @@ export function AdminDashboard() {
     catch (err) { setError(err instanceof Error ? err.message : "Could not update site details."); }
   }
 
+  async function savePageCopy(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setError(""); setNotice("");
+    try {
+      const saved = await request(`/api/admin/page-content/${selectedPageSlug}`, { method: "PUT", body: JSON.stringify({ content: pageCopies[selectedPageSlug] }) });
+      setPageCopies(current => ({ ...current, [selectedPageSlug]: { ...current[selectedPageSlug], ...saved.content } }));
+      setNotice(`${editablePages.find(page => page.slug === selectedPageSlug)?.label ?? "Page"} content saved and published.`);
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not save page content."); }
+  }
+
   async function saveSmtpSettings(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setError(""); setNotice("");
     try {
@@ -338,7 +351,15 @@ export function AdminDashboard() {
   return <section className="admin-shell"><div className="admin-panel">
     <div className="admin-heading"><div><span className="eyebrow"><span/> WEBSITE CONTENT</span><h1>Academy admin</h1><p>Updates publish to the public website as soon as you save them.</p></div><button className="admin-secondary" onClick={signOut}>Sign out</button></div>
     {error && <p className="form-error" role="alert">{error}</p>}{notice && <p className="form-success" role="status">{notice}</p>}
-    <nav className="admin-tabs" aria-label="Admin sections"><button type="button" className={tab === "news" ? "active" : ""} aria-current={tab === "news" ? "page" : undefined} onClick={() => navigateTab("news")}>News</button><button type="button" className={tab === "media" ? "active" : ""} aria-current={tab === "media" ? "page" : undefined} onClick={() => navigateTab("media")}>Photos & videos</button><button type="button" className={tab === "policies" ? "active" : ""} aria-current={tab === "policies" ? "page" : undefined} onClick={() => navigateTab("policies")}>Policies</button><button type="button" className={tab === "calendar" ? "active" : ""} aria-current={tab === "calendar" ? "page" : undefined} onClick={() => navigateTab("calendar")}>Calendar</button><button type="button" className={tab === "details" ? "active" : ""} aria-current={tab === "details" ? "page" : undefined} onClick={() => navigateTab("details")}>Hours & tuition</button><button type="button" className={tab === "contacts" ? "active" : ""} aria-current={tab === "contacts" ? "page" : undefined} onClick={() => navigateTab("contacts")}>Contacts</button><button type="button" className={tab === "applications" ? "active" : ""} aria-current={tab === "applications" ? "page" : undefined} onClick={() => navigateTab("applications")}>Applications</button><button type="button" className={tab === "email" ? "active" : ""} aria-current={tab === "email" ? "page" : undefined} onClick={() => navigateTab("email")}>Email</button></nav>
+    <nav className="admin-tabs" aria-label="Admin sections"><button type="button" className={tab === "news" ? "active" : ""} aria-current={tab === "news" ? "page" : undefined} onClick={() => navigateTab("news")}>News</button><button type="button" className={tab === "media" ? "active" : ""} aria-current={tab === "media" ? "page" : undefined} onClick={() => navigateTab("media")}>Photos & videos</button><button type="button" className={tab === "policies" ? "active" : ""} aria-current={tab === "policies" ? "page" : undefined} onClick={() => navigateTab("policies")}>Policies</button><button type="button" className={tab === "calendar" ? "active" : ""} aria-current={tab === "calendar" ? "page" : undefined} onClick={() => navigateTab("calendar")}>Calendar</button><button type="button" className={tab === "pages" ? "active" : ""} aria-current={tab === "pages" ? "page" : undefined} onClick={() => navigateTab("pages")}>Pages</button><button type="button" className={tab === "details" ? "active" : ""} aria-current={tab === "details" ? "page" : undefined} onClick={() => navigateTab("details")}>Hours & tuition</button><button type="button" className={tab === "contacts" ? "active" : ""} aria-current={tab === "contacts" ? "page" : undefined} onClick={() => navigateTab("contacts")}>Contacts</button><button type="button" className={tab === "applications" ? "active" : ""} aria-current={tab === "applications" ? "page" : undefined} onClick={() => navigateTab("applications")}>Applications</button><button type="button" className={tab === "email" ? "active" : ""} aria-current={tab === "email" ? "page" : undefined} onClick={() => navigateTab("email")}>Email</button></nav>
+
+    {tab === "pages" && <div className="admin-details"><div><h2>Edit page copy</h2><p>Choose a page, edit its headings and main text, then save to publish the changes. A line break in headline fields separates the regular line from the emphasized final line.</p>
+      <form className="admin-form" onSubmit={savePageCopy}>
+        <label>Website page<select value={selectedPageSlug} onChange={event => setSelectedPageSlug(event.target.value)}>{editablePages.map(page => <option key={page.slug} value={page.slug}>{page.label}</option>)}</select></label>
+        {editablePages.find(page => page.slug === selectedPageSlug)?.fields.map(field => <label key={field.key}>{field.label}{field.multiline ? <textarea rows={4} maxLength={20000} value={pageCopies[selectedPageSlug]?.[field.key] ?? ""} onChange={event => setPageCopies(current => ({ ...current, [selectedPageSlug]: { ...current[selectedPageSlug], [field.key]: event.target.value } }))} /> : <input maxLength={20000} value={pageCopies[selectedPageSlug]?.[field.key] ?? ""} onChange={event => setPageCopies(current => ({ ...current, [selectedPageSlug]: { ...current[selectedPageSlug], [field.key]: event.target.value } }))} />}</label>)}
+        <div className="admin-actions"><button className="button">Save page content</button><a className="admin-secondary" href={selectedPageSlug === "home" ? "/" : `/${selectedPageSlug}`} target="_blank" rel="noreferrer">Preview published page</a></div>
+      </form>
+    </div><aside><strong>Layout and tools stay protected.</strong><p>This editor controls the page headings and copy. Registration forms, maps, calendars, contact data, photos, and policy lists keep their dedicated admin editors.</p></aside></div>}
 
     {tab === "applications" && <div className="applications-admin">
       <div className="admin-policy-heading"><div><h2>Registration applications</h2><p>Private family information is visible only to signed-in administrators. Showing the 200 most recent applications.</p></div><button type="button" className="admin-secondary" onClick={refreshRegistrations}>Refresh</button></div>

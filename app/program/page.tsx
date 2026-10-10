@@ -3,19 +3,20 @@ import Link from "next/link";
 import { PageIntro } from "@/components/page-intro";
 import { PodcastPlayer } from "@/components/podcast-player";
 import { ProgramVideo } from "@/components/program-video";
+import { PageCopy, PageCopyTitle } from "@/components/page-copy";
 import { Leaf, Compass, Hand, Sprout, Search, Users, Footprints } from "lucide-react";
 
 export const metadata: Metadata = { title: "Outdoor Preschool Program" };
 
 export default function ProgramPage() {
   return <>
-    <PageIntro eyebrow="OUR PROGRAM" title={<>A little wild.<br/><em>A lot of learning.</em></>} intro="For children ages 2½ to 5, Mother Nature Academy builds confidence, competence, and kindergarten readiness through outdoor play, hands-on discovery, and caring guidance." />
+    <PageIntro page="program" eyebrow="OUR PROGRAM" title="A little wild.\nA lot of learning." intro="For children ages 2½ to 5, Mother Nature Academy builds confidence, competence, and kindergarten readiness through outdoor play, hands-on discovery, and caring guidance." />
 
     <section className="section-pad content-section"><div className="container split-content">
-      <div><div className="section-label"><span>01</span><span className="label-line"/> OUR OUTDOOR PRESCHOOL</div><h2>Learning grows<br/><em>from experience.</em></h2></div>
+      <div><div className="section-label"><span>01</span><span className="label-line"/> OUR OUTDOOR PRESCHOOL</div><h2><PageCopyTitle page="program" field="section_title" fallback="Learning grows\nfrom experience." /></h2></div>
       <div className="prose">
-        <p className="lead">A pinecone can become a question. A question can become the beginning of a day’s learning.</p>
-        <p>Mother Nature Academy offers an outdoor preschool for children ages 2½ to 5. Children spend their program morning exploring a natural setting, learning through movement, play, conversation, and direct experience.</p>
+        <p className="lead"><PageCopy page="program" field="section_lead" /></p>
+        <p><PageCopy page="program" field="section_body" /></p>
         <p>Our approach draws inspiration from nature and forest preschools: children have room to explore, make choices, test ideas, and build capability in a real environment. Educators stay close, observe what captures each child’s attention, and offer materials, questions, and support at the right moment.</p>
         <p>Play is meaningful work. Children practice coordination, persistence, communication, problem-solving, and caring for one another as they build, pretend, notice changes, and follow their own questions.</p>
         <Link className="text-link" href="/curriculum">Explore our curriculum <span>↗</span></Link>
@@ -24,16 +25,16 @@ export default function ProgramPage() {
 
     <section className="program-landscape"><div className="container program-landscape-grid">
       <div className="program-landscape-image" role="img" aria-label="Children’s outdoor learning spaces at Mother Nature Academy" />
-      <div><span className="eyebrow"><span/> A MORNING WITH ROOM TO EXPLORE</span><h2>Outside is where<br/><em>the day unfolds.</em></h2>
-        <p>On the academy’s 6.5-acre farm, children can move between the nature trail, gardens, building materials, mud kitchen, books, and open-ended play spaces. Each place offers a different way to wonder, practice, and connect.</p>
+      <div><span className="eyebrow"><span/> A MORNING WITH ROOM TO EXPLORE</span><h2><PageCopyTitle page="program" field="landscape_title" fallback="Outside is where\nthe day unfolds." /></h2>
+        <p><PageCopy page="program" field="landscape_body" /></p>
         <p>A walk can turn into noticing animal tracks. Children might compare shapes, count what they find, draw a map, tell a story, or bring a question back to the group. Everyday discoveries invite many kinds of learning at once.</p>
         <Link className="text-link" href="/campus">See the campus and its learning spaces <span>↗</span></Link>
       </div>
     </div></section>
 
     <section className="program-ready"><div className="container program-ready-grid">
-      <div><div className="section-label"><span>02</span><span className="label-line"/> CONFIDENCE FOR WHAT COMES NEXT</div><h2>Kindergarten readiness<br/><em>with a strong foundation.</em></h2></div>
-      <div className="prose"><p className="lead">Readiness is more than knowing a list of facts. It grows through the everyday ways children think, communicate, move, and take part.</p>
+      <div><div className="section-label"><span>02</span><span className="label-line"/> CONFIDENCE FOR WHAT COMES NEXT</div><h2><PageCopyTitle page="program" field="readiness_title" fallback="Kindergarten readiness\nwith a strong foundation." /></h2></div>
+      <div className="prose"><p className="lead"><PageCopy page="program" field="readiness_body" /></p>
         <p>Our educators support the skills children carry into their next classroom: curiosity, independence, listening, expressing ideas, working through a challenge, and joining a community. When children are interested in something, that interest can make room for early math, language, science, creativity, and new vocabulary.</p>
         <p>Families may have different questions about what their child should know before kindergarten. We welcome those conversations and can talk about how the child’s experiences connect with the expectations of the schools they may attend.</p>
       </div>
