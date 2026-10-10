@@ -78,7 +78,7 @@ function PageBlockEditor({ blocks, onChange }: { blocks: PageBlock[]; onChange: 
       <label>Heading<input maxLength={180} value={block.heading} onChange={event => updateBlock(index, { heading: event.target.value })} /></label>
       <label>Text<textarea rows={4} maxLength={4000} value={block.body} onChange={event => updateBlock(index, { body: event.target.value })} /></label>
       <label>Layout<select value={block.layout ?? "standard"} onChange={event => updateBlock(index, { layout: event.target.value as PageBlock["layout"] })}><option value="standard">Standard</option><option value="image-left">Media on the left</option><option value="image-right">Media on the right</option><option value="centered">Centered</option></select></label>
-      {block.type === "image" && <><label>Image URL<input type="text" placeholder="/media/photo.jpg or https://…" value={block.image_url ?? ""} onChange={event => updateBlock(index, { image_url: event.target.value })} /></label><label>Alternative text<input maxLength={300} value={block.image_alt ?? ""} onChange={event => updateBlock(index, { image_alt: event.target.value })} /></label><label>Caption<input maxLength={500} value={block.caption ?? ""} onChange={event => updateBlock(index, { caption: event.target.value })} /></label></>}
+      {block.type === "image" && <><label>Image URL<input type="text" placeholder="/media/photo.jpg or https://…" value={block.image_url ?? ""} onChange={event => updateBlock(index, { image_url: event.target.value })} /></label><label>Alternative text<input maxLength={300} value={block.image_alt ?? ""} onChange={event => updateBlock(index, { image_alt: event.target.value })} /></label><label>Image display style<select value={block.image_fit ?? "cover"} onChange={event => updateBlock(index, { image_fit: event.target.value as PageBlock["image_fit"] })}><option value="cover">Crop to fill</option><option value="contain">Fit whole image</option><option value="fill">Stretch to fill</option><option value="none">Original size</option><option value="scale-down">Scale down if needed</option></select></label><label>Caption<input maxLength={500} value={block.caption ?? ""} onChange={event => updateBlock(index, { caption: event.target.value })} /></label></>}
       {block.type === "video" && <label>YouTube video URL<input type="url" placeholder="https://www.youtube.com/watch?v=…" value={block.video_url ?? ""} onChange={event => updateBlock(index, { video_url: event.target.value })} /></label>}
       {block.type === "callout" && <><label>Button text<input maxLength={80} value={block.button_label ?? ""} onChange={event => updateBlock(index, { button_label: event.target.value })} /></label><label>Button link<input maxLength={500} placeholder="/register or https://…" value={block.button_url ?? ""} onChange={event => updateBlock(index, { button_url: event.target.value })} /></label></>}
       <label className="page-block-color">Background color<input type="color" value={block.background} onChange={event => updateBlock(index, { background: event.target.value })} /><small>{block.background}</small></label>
@@ -242,15 +242,19 @@ export function AdminDashboard() {
       }
       if (message.type === "delete-block" && typeof message.blockId === "string") {
         setPageBlocks(current => {
-          const blocks = (current[page] ?? []).filter(block => block.id !== message.blockId);
+          const blocks = (current[page] ?? []).filter(block => block.id !== message.blockId && block.parent_id !== message.blockId);
           visualFrameRef.current?.contentWindow?.postMessage({ source: "mna-admin", type: "replace-page-blocks", page, blocks }, window.location.origin);
           return { ...current, [page]: blocks };
         });
       }
       if (message.type === "add-block" && ["text", "image", "video", "callout"].includes(message.blockType)) {
         const type = message.blockType as PageBlockType;
-        const block: PageBlock = { id: crypto.randomUUID(), type, heading: "", body: "", background: "#fffefa", layout: type === "image" || type === "video" ? "image-left" : type === "callout" ? "centered" : "standard" };
         setPageBlocks(current => {
+          const requestedPosition = message.floatingPosition;
+          const floating_position = type !== "callout" && requestedPosition && typeof requestedPosition === "object"
+            ? Object.fromEntries(["x", "y", "width", "height"].map(key => [key, Number((requestedPosition as Record<string, unknown>)[key])])) as { x: number; y: number; width: number; height: number }
+            : undefined;
+          const block: PageBlock = { id: crypto.randomUUID(), type, heading: "", body: "", background: "#fffefa", ...(floating_position ? { floating_position } : {}), layout: type === "image" || type === "video" ? "image-left" : type === "callout" ? "centered" : "standard" };
           const blocks = [...(current[page] ?? []), block];
           visualFrameRef.current?.contentWindow?.postMessage({ source: "mna-admin", type: "replace-page-blocks", page, blocks }, window.location.origin);
           return { ...current, [page]: blocks };

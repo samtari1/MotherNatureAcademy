@@ -638,19 +638,26 @@ class PageContentInput(BaseModel):
             if key == "visual_elements":
                 if not isinstance(text_value, dict) or len(text_value) > 1000:
                     raise ValueError("Visual element settings have an unsupported format.")
-                allowed_style_keys = {"font_size", "color", "background_color", "background_image", "text_align", "font_weight", "link_url", "link_label", "image_url", "image_alt"}
+                allowed_style_keys = {"font_size", "color", "background_color", "background_image", "text_align", "font_weight", "link_url", "link_label", "image_url", "image_alt", "text_content", "x", "y", "width", "height", "hidden"}
                 for element_key, settings in text_value.items():
                     if not isinstance(element_key, str) or not element_key or len(element_key) > 500 or not isinstance(settings, dict) or set(settings) - allowed_style_keys:
                         raise ValueError("A visual element setting has an unsupported format.")
                     if "font_size" in settings and (isinstance(settings["font_size"], bool) or not isinstance(settings["font_size"], (int, float)) or not 8 <= settings["font_size"] <= 120):
                         raise ValueError("Font sizes must be between 8 and 120 pixels.")
+                    if "hidden" in settings and not isinstance(settings["hidden"], bool):
+                        raise ValueError("Element visibility must be true or false.")
+                    for geometry_key in ("x", "y", "width", "height"):
+                        if geometry_key in settings and (isinstance(settings[geometry_key], bool) or not isinstance(settings[geometry_key], (int, float)) or not -10000 <= settings[geometry_key] <= 10000):
+                            raise ValueError("Image positions and dimensions must be valid pixel values.")
+                    if "width" in settings and settings["width"] < 40 or "height" in settings and settings["height"] < 40:
+                        raise ValueError("Image dimensions must be at least 40 pixels.")
                     for color_key in ("color", "background_color"):
                         if color_key in settings and (not isinstance(settings[color_key], str) or not re.fullmatch(r"#[0-9a-fA-F]{6}", settings[color_key])):
                             raise ValueError("Choose a valid six-digit color.")
                     if settings.get("text_align") not in (None, "left", "center", "right") or settings.get("font_weight") not in (None, "normal", "500", "600", "700"):
                         raise ValueError("Choose a supported text alignment and font weight.")
                     for text_key, text_value_inner in settings.items():
-                        if text_key in {"font_size", "color", "background_color", "text_align", "font_weight"}:
+                        if text_key in {"font_size", "color", "background_color", "text_align", "font_weight", "x", "y", "width", "height"}:
                             continue
                         if not isinstance(text_value_inner, str) or len(text_value_inner) > 4000:
                             raise ValueError("Visual element text and URLs must be 4,000 characters or fewer.")
@@ -683,14 +690,14 @@ class PageContentInput(BaseModel):
                 if not isinstance(text_value, list) or len(text_value) > 30:
                     raise ValueError("A page can have no more than 30 content blocks.")
                 allowed_types = {"text", "image", "video", "callout"}
-                allowed_keys = {"id", "type", "heading", "body", "background", "layout", "element_layout", "image_url", "image_alt", "caption", "video_url", "button_label", "button_url"}
+                allowed_keys = {"id", "type", "heading", "body", "background", "layout", "parent_id", "floating_position", "element_layout", "image_url", "image_alt", "image_fit", "caption", "video_url", "button_label", "button_url"}
                 for block in text_value:
                     if not isinstance(block, dict) or set(block) - allowed_keys or block.get("type") not in allowed_types:
                         raise ValueError("A page block has an unsupported format.")
                     if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", str(block.get("id", ""))):
                         raise ValueError("Each page block needs a valid identifier.")
                     for block_key, block_value in block.items():
-                        if block_key == "element_layout":
+                        if block_key in {"element_layout", "floating_position"}:
                             continue
                         if not isinstance(block_value, str) or len(block_value) > 20000:
                             raise ValueError("Page block fields must be text with at most 20,000 characters.")
@@ -698,6 +705,20 @@ class PageContentInput(BaseModel):
                         raise ValueError("Choose a valid six-digit background color.")
                     if block.get("layout", "standard") not in {"standard", "image-left", "image-right", "centered"}:
                         raise ValueError("Choose a supported block layout.")
+                    if block.get("image_fit", "cover") not in {"cover", "contain", "fill", "none", "scale-down"}:
+                        raise ValueError("Choose a supported image display style.")
+                    if "parent_id" in block and not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", str(block["parent_id"])):
+                        raise ValueError("A nested page block needs a valid parent identifier.")
+                    floating_position = block.get("floating_position")
+                    if floating_position is not None:
+                        if block.get("type") == "callout" or not isinstance(floating_position, dict) or set(floating_position) != {"x", "y", "width", "height"}:
+                            raise ValueError("A floating page element needs a valid position and size.")
+                        values = [floating_position[key] for key in ("x", "y", "width", "height")]
+                        if any(isinstance(number, bool) or not isinstance(number, (int, float)) for number in values):
+                            raise ValueError("Floating page element position and size must be numbers.")
+                        x, y, width, height = values
+                        if not (0 <= x <= 10000 and 0 <= y <= 100000 and 40 <= width <= 5000 and 40 <= height <= 3000):
+                            raise ValueError("Floating page element position or size is outside the allowed range.")
                     element_layout = block.get("element_layout", {})
                     if not isinstance(element_layout, dict) or set(element_layout) - {"media", "copy"}:
                         raise ValueError("Page element layout has an unsupported format.")
@@ -718,6 +739,15 @@ class PageContentInput(BaseModel):
                         url_value = block.get(url_key, "")
                         if url_value and not ((url_value.startswith("/") and not url_value.startswith("//")) or url_value.startswith("https://")):
                             raise ValueError("Page image and button links must use a site path or HTTPS URL.")
+                blocks_by_id = {block["id"]: block for block in text_value}
+                if len(blocks_by_id) != len(text_value):
+                    raise ValueError("Page block identifiers must be unique.")
+                for block in text_value:
+                    parent_id = block.get("parent_id")
+                    if parent_id:
+                        parent = blocks_by_id.get(parent_id)
+                        if block["type"] == "callout" or not parent or parent["type"] != "callout" or parent.get("parent_id"):
+                            raise ValueError("Only text, image, and video blocks can be placed inside a top-level callout.")
                 continue
             if not re.fullmatch(r"[a-z][a-z0-9_]{0,79}", key):
                 raise ValueError("Page content contains an invalid field name.")
@@ -1560,6 +1590,33 @@ async def upload_admin_photo(
         db.commit()
         db.refresh(item)
         return media_to_dict(item)
+
+
+@app.post("/api/admin/page-images", status_code=201)
+async def upload_page_image(
+    request: Request,
+    file: UploadFile = File(...),
+    _: str = Depends(require_admin),
+):
+    """Store an image asset for a page-builder image block without adding it to the photo gallery."""
+    allowed_admin_origin(request)
+    content_type = (file.content_type or "").lower()
+    signatures = {
+        "image/jpeg": ("jpg", lambda data: data.startswith(b"\xff\xd8\xff")),
+        "image/png": ("png", lambda data: data.startswith(b"\x89PNG\r\n\x1a\n")),
+        "image/webp": ("webp", lambda data: data.startswith(b"RIFF") and data[8:12] == b"WEBP"),
+    }
+    if content_type not in signatures:
+        raise HTTPException(status_code=415, detail="Upload a JPG, PNG, or WebP image.")
+    contents = await file.read(8 * 1024 * 1024 + 1)
+    extension, signature_check = signatures[content_type]
+    if len(contents) > 8 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Image files must be 8 MB or smaller.")
+    if not signature_check(contents):
+        raise HTTPException(status_code=415, detail="The uploaded file does not match its image type.")
+    filename = f"{uuid.uuid4().hex}.{extension}"
+    Path(settings.media_dir, filename).write_bytes(contents)
+    return {"url": f"/media/{filename}"}
 
 
 @app.post("/api/admin/media/videos", status_code=201)
