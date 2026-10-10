@@ -75,6 +75,34 @@ function findVisualCallout(element: HTMLElement) {
     ?? element.closest<HTMLElement>('[class*="callout"],[class*="cta"]');
 }
 
+function findVisualSection(element: HTMLElement) {
+  return findVisualCallout(element) ?? element.closest<HTMLElement>("section");
+}
+
+function preserveElementFlowSpace(element: HTMLElement) {
+  const parent = element.parentElement;
+  if (!parent) return;
+  const measuredHeight = parent.getBoundingClientRect().height;
+  const existingMinHeight = Number.parseFloat(parent.style.minHeight) || 0;
+  parent.style.minHeight = `${Math.max(measuredHeight, existingMinHeight)}px`;
+}
+
+function applyFreeCopyLayout(element: HTMLElement, canvas: HTMLElement, layout: CopyElementLayout) {
+  element.style.position = "absolute";
+  element.style.display = "inline-block";
+  element.style.boxSizing = "border-box";
+  element.style.zIndex = "2";
+  const containingBlock = element.offsetParent instanceof HTMLElement ? element.offsetParent : canvas;
+  const canvasRect = canvas.getBoundingClientRect();
+  const containingRect = containingBlock.getBoundingClientRect();
+  const left = containingRect.left - canvasRect.left + containingBlock.clientLeft - containingBlock.scrollLeft;
+  const top = containingRect.top - canvasRect.top + containingBlock.clientTop - containingBlock.scrollTop;
+  element.style.left = `${layout.x - left}px`;
+  element.style.top = `${layout.y - top}px`;
+  element.style.width = `${layout.width}px`;
+  element.style.minHeight = `${layout.height}px`;
+}
+
 function visualElementKey(element: HTMLElement, root: HTMLElement) {
   const copyKey = element.closest<HTMLElement>("[data-copy-element]")?.dataset.copyElement;
   if (copyKey) return `copy:${copyKey}`;
@@ -206,7 +234,7 @@ function VisualElementInspector({ valueMap, setValueMap }: { valueMap: Record<st
     function selectElement(event: MouseEvent) {
       const target = event.target instanceof HTMLElement ? event.target : null;
       if (!target) return;
-      if (target.closest(".visual-edit-toolbar,.visual-property-panel,.visual-copy-tools,.visual-element-tools,.visual-block-controls,.visual-callout-editor-controls,.visual-callout-resize-handle,input,textarea,select")) return;
+      if (target.closest(".visual-edit-toolbar,.visual-property-panel,.visual-copy-tools,.visual-element-tools,.visual-block-controls,.visual-section-editor-controls,.visual-section-resize-handle,input,textarea,select")) return;
       const clearSelection = () => {
         selectedRef.current?.classList.remove("visual-element-selected");
         selectedRef.current = null;
@@ -257,31 +285,34 @@ function VisualElementInspector({ valueMap, setValueMap }: { valueMap: Record<st
     return () => { document.removeEventListener("click", selectElement, true); selectedRef.current?.classList.remove("visual-element-selected"); };
   }, []);
   const calloutTarget = selected ? findVisualCallout(selected) : null;
+  const sectionTarget = selected ? findVisualSection(selected) : null;
   useEffect(() => {
-    if (!calloutTarget) return;
-    const target = calloutTarget;
+    if (!sectionTarget) return;
+    const target = sectionTarget;
     const root = document.querySelector<HTMLElement>("main.page-layout-canvas");
     if (!root) return;
     const activeRoot = root;
     const originalPosition = target.style.position;
     if (window.getComputedStyle(target).position === "static") target.style.position = "relative";
     const controls = document.createElement("div");
-    controls.className = "visual-callout-editor-controls";
-    const deleteButton = document.createElement("button");
-    deleteButton.type = "button";
-    deleteButton.className = "visual-delete-callout";
-    deleteButton.textContent = "Delete callout";
+    controls.className = "visual-section-editor-controls";
+    const deleteButton = calloutTarget ? document.createElement("button") : null;
+    if (deleteButton) {
+      deleteButton.type = "button";
+      deleteButton.className = "visual-delete-callout";
+      deleteButton.textContent = "Delete callout";
+    }
     const handle = document.createElement("div");
-    handle.className = "visual-callout-resize-handle";
-    handle.title = "Drag this bottom border up or down to resize the callout";
+    handle.className = "visual-section-resize-handle";
+    handle.title = "Drag this bottom border up or down to resize the section";
     handle.setAttribute("role", "separator");
-    handle.setAttribute("aria-label", "Drag the callout bottom border to resize its height");
+    handle.setAttribute("aria-label", "Drag the section bottom border to resize its height");
     handle.textContent = "↕ Drag bottom border to resize";
-    controls.append(deleteButton);
+    if (deleteButton) controls.append(deleteButton);
     target.appendChild(controls);
     target.appendChild(handle);
     function onDelete() {
-      if (!window.confirm("Delete this callout from the page? Save the page to publish this change.")) return;
+      if (!calloutTarget || !window.confirm("Delete this callout from the page? Save the page to publish this change.")) return;
       const blockId = target.closest<HTMLElement>("[data-page-block-id]")?.dataset.pageBlockId;
       if (blockId) {
         postVisualEdit({ type: "delete-block", page: pageRef.current, blockId });
@@ -319,16 +350,16 @@ function VisualElementInspector({ valueMap, setValueMap }: { valueMap: Record<st
       window.addEventListener("pointermove", onPointerMove);
       window.addEventListener("pointerup", onPointerUp, { once: true });
     }
-    deleteButton.addEventListener("click", onDelete);
+    deleteButton?.addEventListener("click", onDelete);
     handle.addEventListener("pointerdown", onPointerDown);
     return () => {
-      deleteButton.removeEventListener("click", onDelete);
+      deleteButton?.removeEventListener("click", onDelete);
       handle.removeEventListener("pointerdown", onPointerDown);
       controls.remove();
       handle.remove();
       target.style.position = originalPosition;
     };
-  }, [calloutTarget, setValueMap]);
+  }, [calloutTarget, sectionTarget, setValueMap]);
   function update<K extends keyof VisualElementStyle>(key: K, value: VisualElementStyle[K]) {
     if (!selected) return;
     const patch = { [key]: value } as Pick<VisualElementStyle, K>;
@@ -364,7 +395,7 @@ function VisualElementInspector({ valueMap, setValueMap }: { valueMap: Record<st
     setSelected(null);
   }
   return <aside className="visual-property-panel" data-visual-ui>
-    <div className="visual-property-heading"><div><strong>Selected element</strong><small>{selected.tagName.toLowerCase()} · {selected.dataset.visualLabel ?? selected.dataset.copyElement ?? "page content"}</small></div><div className="visual-property-actions">{isCallout && <button type="button" className="visual-delete-callout" onClick={deleteCallout}>Delete callout</button>}<button type="button" aria-label="Close element settings" onClick={() => { selected.classList.remove("visual-element-selected"); selectedRef.current = null; setSelected(null); }}>×</button></div></div>
+    <div className="visual-property-heading"><div><strong>Selected element</strong><small>{selected.tagName.toLowerCase()} · {selected.dataset.visualLabel ?? selected.dataset.copyElement ?? "page content"}</small></div><div className="visual-property-actions">{isCallout && <button type="button" className="visual-delete-callout" onClick={deleteCallout}>Delete callout</button>}<button type="button" className="visual-panel-close" aria-label="Close element settings" title="Close settings" onClick={() => { selected.classList.remove("visual-element-selected"); selectedRef.current = null; setSelected(null); }}>×</button></div></div>
     <details className="visual-settings-group" open><summary>Typography</summary><div className="visual-property-row"><label>Size<input type="number" min="8" max="120" value={values.font_size ?? 16} onChange={event => update("font_size", Math.max(8, Math.min(120, Number(event.target.value) || 16)))} /></label><label>Weight<select value={values.font_weight ?? "normal"} onChange={event => update("font_weight", event.target.value as VisualElementStyle["font_weight"])}><option value="normal">Regular</option><option value="500">Medium</option><option value="600">Semibold</option><option value="700">Bold</option></select></label></div><div className="visual-property-row"><label>Text color<input type="color" value={colorInputValue(values.color ?? "#26382f")} onChange={event => update("color", event.target.value)} /></label><label>Alignment<select value={values.text_align ?? "left"} onChange={event => update("text_align", event.target.value as VisualElementStyle["text_align"])}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label></div></details>
     <details className="visual-settings-group"><summary>Background</summary><label>Color<input type="color" value={colorInputValue(values.background_color ?? "#ffffff")} onChange={event => update("background_color", event.target.value)} /></label></details>
     {(isAnchor || isButton) && <details className="visual-settings-group"><summary>{isAnchor ? "Link" : "Button"}</summary>{isAnchor && <label>Destination<input value={values.link_url ?? ""} onChange={event => update("link_url", event.target.value)} /></label>}<label>Label<input value={values.link_label ?? ""} onChange={event => update("link_label", event.target.value)} /></label></details>}
@@ -383,29 +414,24 @@ function VisualCopyElement({ page, field, children, className }: { page: string;
     const element = elementRef.current;
     const canvas = document.querySelector<HTMLElement>("main.page-layout-canvas");
     if (!element || !canvas || layout?.unit !== "free") return;
-    element.style.left = ""; element.style.top = ""; element.style.width = ""; element.style.minHeight = "";
-    const natural = element.getBoundingClientRect(); const canvasRect = canvas.getBoundingClientRect();
-    element.style.position = "relative"; element.style.display = "inline-block"; element.style.boxSizing = "border-box";
-    element.style.left = `${layout.x - (natural.left - canvasRect.left)}px`;
-    element.style.top = `${layout.y - (natural.top - canvasRect.top)}px`;
-    element.style.width = `${layout.width}px`; element.style.minHeight = `${layout.height}px`;
+    element.style.position = ""; element.style.left = ""; element.style.top = ""; element.style.width = ""; element.style.minHeight = "";
+    preserveElementFlowSpace(element);
+    applyFreeCopyLayout(element, canvas, layout);
   }, [layout]);
   function adjust(event: ReactPointerEvent<HTMLButtonElement>, mode: "move" | "resize") {
     event.preventDefault(); event.stopPropagation();
     const element = event.currentTarget.closest<HTMLElement>("[data-copy-element]");
     const canvas = document.querySelector<HTMLElement>("main.page-layout-canvas");
     if (!element || !canvas) return;
+    const activeCanvas = canvas;
     const activeElement = element;
     const canvasRect = canvas.getBoundingClientRect(); const visualRect = element.getBoundingClientRect();
     const visualX = visualRect.left - canvasRect.left; const visualY = visualRect.top - canvasRect.top;
-    element.style.left = ""; element.style.top = ""; element.style.width = ""; element.style.minHeight = "";
-    const naturalRect = element.getBoundingClientRect();
     const current: CopyElementLayout = { x: layout?.unit === "free" ? layout.x : visualX, y: layout?.unit === "free" ? layout.y : visualY, width: layout?.unit === "free" ? layout.width : visualRect.width, height: layout?.unit === "free" ? layout.height : visualRect.height, unit: "free" };
-    const originX = naturalRect.left - canvasRect.left; const originY = naturalRect.top - canvasRect.top;
+    preserveElementFlowSpace(activeElement);
     const startX = event.clientX; const startY = event.clientY;
     function apply(next: CopyElementLayout) {
-      activeElement.style.position = "relative"; activeElement.style.display = "inline-block"; activeElement.style.boxSizing = "border-box";
-      activeElement.style.left = `${next.x - originX}px`; activeElement.style.top = `${next.y - originY}px`; activeElement.style.width = `${next.width}px`; activeElement.style.minHeight = `${next.height}px`;
+      applyFreeCopyLayout(activeElement, activeCanvas, next);
       return next;
     }
     apply(current);
@@ -496,8 +522,9 @@ export function PageBlocks({ page }: { page: string }) {
     event.stopPropagation();
     const canvas = event.currentTarget.closest(".page-builder-inner");
     if (!(canvas instanceof HTMLElement)) return;
-    canvas.classList.add("page-builder-positioned");
     const canvasRect = canvas.getBoundingClientRect();
+    if (!canvas.classList.contains("page-builder-positioned")) canvas.style.minHeight = `${canvasRect.height}px`;
+    canvas.classList.add("page-builder-positioned");
     const slots = Array.from(canvas.querySelectorAll<HTMLElement>("[data-layout-slot]"));
     const layouts: Record<string, ElementLayout> = {};
     const measured = slots.map(element => {
