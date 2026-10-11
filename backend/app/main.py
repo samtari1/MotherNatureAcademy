@@ -1623,6 +1623,32 @@ async def upload_page_image(
     return {"url": f"/media/{filename}"}
 
 
+@app.post("/api/admin/page-videos", status_code=201)
+async def upload_page_video(
+    request: Request,
+    file: UploadFile = File(...),
+    _: str = Depends(require_admin),
+):
+    """Store an MP4/WebM video asset for a page-builder video block."""
+    allowed_admin_origin(request)
+    content_type = (file.content_type or "").lower()
+    signatures = {
+        "video/mp4": ("mp4", lambda data: len(data) >= 12 and data[4:8] == b"ftyp"),
+        "video/webm": ("webm", lambda data: data.startswith(b"\x1a\x45\xdf\xa3")),
+    }
+    if content_type not in signatures:
+        raise HTTPException(status_code=415, detail="Upload an MP4 or WebM video.")
+    contents = await file.read(100 * 1024 * 1024 + 1)
+    extension, signature_check = signatures[content_type]
+    if len(contents) > 100 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Video files must be 100 MB or smaller.")
+    if not signature_check(contents):
+        raise HTTPException(status_code=415, detail="The uploaded file does not match its video type.")
+    filename = f"{uuid.uuid4().hex}.{extension}"
+    Path(settings.media_dir, filename).write_bytes(contents)
+    return {"url": f"/media/{filename}"}
+
+
 @app.post("/api/admin/media/videos", status_code=201)
 def create_admin_video(payload: VideoInput, request: Request, _: str = Depends(require_admin)):
     allowed_admin_origin(request)

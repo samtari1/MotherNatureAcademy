@@ -349,6 +349,9 @@ function VisualElementInspector({ valueMap, setValueMap }: { valueMap: Record<st
   const [selected, setSelected] = useState<HTMLElement | null>(null);
   const [values, setValues] = useState<VisualElementStyle>({});
   const [imageUploadStatus, setImageUploadStatus] = useState("");
+  const [panelPosition, setPanelPosition] = useState<{ x: number; y: number } | null>(null);
+  const [panelUserMoved, setPanelUserMoved] = useState(false);
+  const panelRef = useRef<HTMLElement | null>(null);
   const keyRef = useRef("");
   const pageRef = useRef("");
   const selectedRef = useRef<HTMLElement | null>(null);
@@ -376,8 +379,9 @@ function VisualElementInspector({ valueMap, setValueMap }: { valueMap: Record<st
       // copy selects the whole callout. Links and images remain independently
       // selectable so their destination/source can still be edited.
       const callout = findVisualCallout(target);
+      const videoElement = target.closest<HTMLElement>(".page-builder-video");
       const specificElement = target.closest<HTMLElement>("img") ?? target.closest<HTMLElement>("button") ?? target.closest<HTMLElement>("a");
-      const element = specificElement ?? callout ?? target.closest<HTMLElement>("main.page-layout-canvas *");
+      const element = videoElement ?? specificElement ?? callout ?? target.closest<HTMLElement>("main.page-layout-canvas *");
       if (element?.classList.contains("page-builder-sections")) {
         clearSelection();
         return;
@@ -391,6 +395,7 @@ function VisualElementInspector({ valueMap, setValueMap }: { valueMap: Record<st
         event.stopPropagation();
       }
       selectedRef.current?.classList.remove("visual-element-selected");
+      setPanelUserMoved(false);
       const page = visualPageSlug();
       const key = visualElementKey(element, activeRoot);
       pageRef.current = page; keyRef.current = key;
@@ -417,6 +422,29 @@ function VisualElementInspector({ valueMap, setValueMap }: { valueMap: Record<st
     document.addEventListener("click", selectElement, true);
     return () => { document.removeEventListener("click", selectElement, true); selectedRef.current?.classList.remove("visual-element-selected"); };
   }, []);
+  useLayoutEffect(() => {
+    if (!selected || panelUserMoved) return;
+    function placePanel() {
+      const panel = panelRef.current;
+      if (!panel) return;
+      const target = selected!.getBoundingClientRect();
+      const panelBounds = panel.getBoundingClientRect();
+      const margin = 12;
+      const maxX = Math.max(margin, window.innerWidth - panelBounds.width - margin);
+      const maxY = Math.max(margin, window.innerHeight - panelBounds.height - margin);
+      setPanelPosition({
+        x: maxX,
+        y: Math.min(maxY, Math.max(margin, target.top + target.height / 2 - panelBounds.height / 2)),
+      });
+    }
+    placePanel();
+    window.addEventListener("resize", placePanel);
+    window.addEventListener("scroll", placePanel, true);
+    return () => {
+      window.removeEventListener("resize", placePanel);
+      window.removeEventListener("scroll", placePanel, true);
+    };
+  }, [selected, panelUserMoved]);
   useEffect(() => {
     if (!selected) return;
     const image = selected;
@@ -545,8 +573,10 @@ function VisualElementInspector({ valueMap, setValueMap }: { valueMap: Record<st
       window.removeEventListener("scroll", onScroll, true);
     };
   }, [selected, setValueMap]);
-  const calloutTarget = selected ? findVisualCallout(selected) : null;
-  const sectionTarget = selected ? findVisualSection(selected) : null;
+  const mediaImageSelected = Boolean(selected && isPageBlockMediaImage(selected));
+  const calloutTarget = selected && !mediaImageSelected ? findVisualCallout(selected) : null;
+  const selectedSection = selected && (selected.tagName === "SECTION" || selected === calloutTarget);
+  const sectionTarget = selectedSection && !mediaImageSelected ? findVisualSection(selected) : null;
   useEffect(() => {
     if (!sectionTarget) return;
     const target = sectionTarget;
@@ -634,10 +664,11 @@ function VisualElementInspector({ valueMap, setValueMap }: { valueMap: Record<st
   const isAnchor = selected instanceof HTMLAnchorElement;
   const sectionId = selected.closest<HTMLElement>("[data-page-block-id]")?.dataset.pageBlockId;
   const imageBlock = sectionId ? (pageBlocks.data[pageRef.current] ?? []).find(block => block.id === sectionId && block.type === "image") : undefined;
+  const videoBlock = sectionId ? (pageBlocks.data[pageRef.current] ?? []).find(block => block.id === sectionId && block.type === "video") : undefined;
   const isImage = selected instanceof HTMLImageElement || Boolean(imageBlock);
   const isButton = selected instanceof HTMLButtonElement;
   const hasBackgroundImage = Boolean(values.background_image);
-  const canEditText = !isImage && !(selected instanceof HTMLImageElement) && (directTextContent(selected).length > 0 || selected.childElementCount === 0);
+  const canEditText = !isImage && !videoBlock && !(selected instanceof HTMLImageElement) && (directTextContent(selected).length > 0 || selected.childElementCount === 0);
   const isCallout = Boolean(calloutTarget);
   function deleteCallout() {
     if (!calloutTarget || !window.confirm("Delete this section from the page? Save the page to publish this change.")) return;
@@ -689,6 +720,11 @@ function VisualElementInspector({ valueMap, setValueMap }: { valueMap: Record<st
     if (patch.image_url !== undefined && selected instanceof HTMLImageElement) selected.src = patch.image_url;
     if (patch.image_alt !== undefined && selected instanceof HTMLImageElement) selected.alt = patch.image_alt;
   }
+  function updateVideoBlock(patch: Partial<PageBlock>) {
+    if (!videoBlock) return;
+    pageBlocks.setData(current => ({ ...current, [pageRef.current]: (current[pageRef.current] ?? []).map(block => block.id === videoBlock.id ? { ...block, ...patch } : block) }));
+    postVisualEdit({ type: "block-update", page: pageRef.current, blockId: videoBlock.id, patch });
+  }
   async function uploadImageBlock(file: File) {
     if (!imageBlock) return;
     setImageUploadStatus("Uploading image…");
@@ -705,15 +741,57 @@ function VisualElementInspector({ valueMap, setValueMap }: { valueMap: Record<st
       setImageUploadStatus(error instanceof Error ? error.message : "Could not upload the image.");
     }
   }
-  return <aside className="visual-property-panel" data-visual-ui>
-    <div className="visual-property-heading"><div><strong>Selected element</strong><small>{imageBlock ? "image · page element" : `${selected.tagName.toLowerCase()} · ${selected.dataset.visualLabel ?? selected.dataset.copyElement ?? "page content"}`}</small></div><div className="visual-property-actions">{isCallout && <button type="button" className="visual-delete-callout" onClick={deleteCallout}>Delete section</button>}<button type="button" className="visual-panel-close" aria-label="Close element settings" title="Close settings" onClick={() => { selected.classList.remove("visual-element-selected"); selectedRef.current = null; setSelected(null); }}>×</button></div></div>
-    {!isImage && <details className="visual-settings-group" open><summary>Typography</summary><div className="visual-property-row"><label>Size<input type="number" min="8" max="120" value={values.font_size ?? 16} onChange={event => update("font_size", Math.max(8, Math.min(120, Number(event.target.value) || 16)))} /></label><label>Weight<select value={values.font_weight ?? "normal"} onChange={event => update("font_weight", event.target.value as VisualElementStyle["font_weight"])}><option value="normal">Regular</option><option value="500">Medium</option><option value="600">Semibold</option><option value="700">Bold</option></select></label></div><div className="visual-property-row"><label>Text color<input type="color" value={colorInputValue(values.color ?? "#26382f")} onChange={event => update("color", event.target.value)} /></label><label>Alignment<select value={values.text_align ?? "left"} onChange={event => update("text_align", event.target.value as VisualElementStyle["text_align"])}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label></div></details>}
+  async function uploadVideoBlock(file: File) {
+    if (!videoBlock) return;
+    setImageUploadStatus("Uploading video…");
+    const form = new FormData();
+    form.append("file", file);
+    try {
+      const response = await fetch("/api/admin/page-videos", { method: "POST", credentials: "include", body: form });
+      const result = await response.json().catch(() => ({})) as { url?: string; detail?: string };
+      if (!response.ok || !result.url) throw new Error(result.detail || "Could not upload the video.");
+      updateVideoBlock({ video_url: result.url });
+      setImageUploadStatus("Video uploaded.");
+    } catch (error) {
+      setImageUploadStatus(error instanceof Error ? error.message : "Could not upload the video.");
+    }
+  }
+  function beginPanelDrag(event: ReactPointerEvent<HTMLDivElement>) {
+    if ((event.target as HTMLElement).closest("button")) return;
+    event.preventDefault();
+    const panel = panelRef.current;
+    if (!panel) return;
+    const bounds = panel.getBoundingClientRect();
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const origin = panelPosition ?? { x: bounds.left, y: bounds.top };
+    setPanelUserMoved(true);
+    function onMove(pointer: PointerEvent) {
+      const margin = 8;
+      const maxX = Math.max(margin, window.innerWidth - panel.offsetWidth - margin);
+      const maxY = Math.max(margin, window.innerHeight - panel.offsetHeight - margin);
+      setPanelPosition({
+        x: Math.min(maxX, Math.max(margin, origin.x + pointer.clientX - startX)),
+        y: Math.min(maxY, Math.max(margin, origin.y + pointer.clientY - startY)),
+      });
+    }
+    function onUp() {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    }
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp, { once: true });
+  }
+  return <aside ref={panelRef} className="visual-property-panel" data-visual-ui style={panelPosition ? { left: panelPosition.x, top: panelPosition.y, right: "auto", bottom: "auto" } : undefined}>
+    <div className="visual-property-heading" onPointerDown={beginPanelDrag} title="Drag to move this settings panel"><div><strong>Selected element</strong><small>{imageBlock ? "image · page element" : videoBlock ? "video · page element" : `${selected.tagName.toLowerCase()} · ${selected.dataset.visualLabel ?? selected.dataset.copyElement ?? "page content"}`}</small></div><div className="visual-property-actions">{isCallout && <button type="button" className="visual-delete-callout" onClick={deleteCallout}>Delete section</button>}<button type="button" className="visual-panel-close" aria-label="Close element settings" title="Close settings" onClick={() => { selected.classList.remove("visual-element-selected"); selectedRef.current = null; setSelected(null); }}>×</button></div></div>
+    {!isImage && !videoBlock && <details className="visual-settings-group" open><summary>Typography</summary><div className="visual-property-row"><label>Size<input type="number" min="8" max="120" value={values.font_size ?? 16} onChange={event => update("font_size", Math.max(8, Math.min(120, Number(event.target.value) || 16)))} /></label><label>Weight<select value={values.font_weight ?? "normal"} onChange={event => update("font_weight", event.target.value as VisualElementStyle["font_weight"])}><option value="normal">Regular</option><option value="500">Medium</option><option value="600">Semibold</option><option value="700">Bold</option></select></label></div><div className="visual-property-row"><label>Text color<input type="color" value={colorInputValue(values.color ?? "#26382f")} onChange={event => update("color", event.target.value)} /></label><label>Alignment<select value={values.text_align ?? "left"} onChange={event => update("text_align", event.target.value as VisualElementStyle["text_align"])}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label></div></details>}
     {canEditText && <details className="visual-settings-group" open><summary>Text</summary><label>Content<textarea rows={4} maxLength={20000} value={values.text_content ?? ""} onChange={event => update("text_content", event.target.value)} /></label></details>}
     <details className="visual-settings-group"><summary>Background</summary><label>Color<input type="color" value={colorInputValue(values.background_color ?? "#ffffff")} onChange={event => update("background_color", event.target.value)} /></label></details>
     {(isAnchor || isButton) && <details className="visual-settings-group"><summary>{isAnchor ? "Link" : "Button"}</summary>{isAnchor && <label>Destination<input value={values.link_url ?? ""} onChange={event => update("link_url", event.target.value)} /></label>}<label>Label<input value={values.link_label ?? ""} onChange={event => update("link_label", event.target.value)} /></label></details>}
     {(isImage || hasBackgroundImage) && <details className="visual-settings-group" open><summary>Image</summary>{isImage ? <><img className="visual-image-edit-preview" src={imageBlock?.image_url ?? values.image_url ?? selected.getAttribute("src") ?? ""} alt="" /><label>Image source URL<input value={imageBlock?.image_url ?? values.image_url ?? selected.getAttribute("src") ?? ""} onChange={event => imageBlock ? updateImageBlock({ image_url: event.target.value }) : update("image_url", event.target.value)} /></label><label>Alternative text<input value={imageBlock?.image_alt ?? values.image_alt ?? (selected instanceof HTMLImageElement ? selected.alt : "")} onChange={event => imageBlock ? updateImageBlock({ image_alt: event.target.value }) : update("image_alt", event.target.value)} /></label>{imageBlock && <><label>Display style<select value={imageBlock.image_fit ?? "cover"} onChange={event => updateImageBlock({ image_fit: event.target.value as PageImageFit })}>{imageFitOptions.map(option => <option value={option.value} key={option.value}>{option.label}</option>)}</select></label><label>Upload from this device<input type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" onChange={event => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; if (file) void uploadImageBlock(file); }} /></label>{imageUploadStatus && <p role="status">{imageUploadStatus}</p>}</>}</> : <><div className="visual-image-edit-preview visual-image-edit-background" style={{ backgroundImage: values.background_image ? `url(${JSON.stringify(values.background_image)})` : "none" }} role="img" aria-label="Selected background image preview" /><label>Image source URL<input value={values.background_image ?? ""} onChange={event => update("background_image", event.target.value)} /></label></>}</details>}
+    {videoBlock && <details className="visual-settings-group" open><summary>Video</summary><label>YouTube URL or video source<input type="url" placeholder="https://www.youtube.com/watch?v=… or /media/video.mp4" value={videoBlock.video_url ?? ""} onChange={event => updateVideoBlock({ video_url: event.target.value })} /></label><label>Upload video from this device<input type="file" accept="video/mp4,video/webm,.mp4,.webm" onChange={event => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; if (file) void uploadVideoBlock(file); }} /></label><small>MP4 and WebM files up to 100 MB are supported.</small>{imageUploadStatus && <p role="status">{imageUploadStatus}</p>}</details>}
     <button type="button" className="visual-delete-element" onClick={deleteSelectedElement}>Delete selected element</button>
-    {sectionId && !isCallout && <button type="button" className="visual-remove-section" onClick={() => { if (!window.confirm("Delete this section from the page? Save the page to publish this change.")) return; postVisualEdit({ type: "delete-block", page: pageRef.current, blockId: sectionId }); selected.classList.remove("visual-element-selected"); selectedRef.current = null; setSelected(null); }}>Delete section</button>}
+    {sectionId && !isCallout && !imageBlock && !videoBlock && <button type="button" className="visual-remove-section" onClick={() => { if (!window.confirm("Delete this section from the page? Save the page to publish this change.")) return; postVisualEdit({ type: "delete-block", page: pageRef.current, blockId: sectionId }); selected.classList.remove("visual-element-selected"); selectedRef.current = null; setSelected(null); }}>Delete section</button>}
     <p>Changes publish when saved in the admin page.</p>
   </aside>;
 }
@@ -820,6 +898,10 @@ function embedVideoUrl(url: string) {
   } catch { return ""; }
 }
 
+function isUploadedPageVideo(url: string) {
+  return /^\/media\/[A-Za-z0-9._-]+\.(?:mp4|webm)$/i.test(url);
+}
+
 function readableTextColor(hex: string) {
   const channels = hex.slice(1).match(/.{2}/g)?.map(channel => parseInt(channel, 16) / 255) ?? [1, 1, 1];
   const luminance = channels.map(channel => channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4).reduce((sum, channel, index) => sum + channel * [0.2126, 0.7152, 0.0722][index], 0);
@@ -855,7 +937,7 @@ export function PageBlocks({ page }: { page: string }) {
     const target = blocks.find(item => item.id === targetId);
     const movingBlock = blocks.find(item => item.id === draggedBlockId);
     if (target?.type === "callout" && !target.parent_id && movingBlock && movingBlock.type !== "callout") {
-      updateBlock(movingBlock.id, { parent_id: target.id });
+      updateBlock(movingBlock.id, { parent_id: target.id, floating_position: undefined, element_layout: {} });
       setDraggedBlockId(null);
       return;
     }
@@ -868,10 +950,14 @@ export function PageBlocks({ page }: { page: string }) {
     const insertAfter = event.clientY >= targetBounds.top + targetBounds.height / 2;
     let insertionIndex = to + (insertAfter ? 1 : 0);
     const [moving] = next.splice(from, 1);
+    // Dropping a nested or floating element onto a regular section makes it
+    // a top-level block. Clear its old parent and free-position layout so the
+    // public page cannot keep rendering it inside the original section.
+    const moved = { ...moving, parent_id: undefined, floating_position: undefined, element_layout: {} };
     if (from < insertionIndex) insertionIndex -= 1;
-    next.splice(insertionIndex, 0, moving);
+    next.splice(insertionIndex, 0, moved);
     setDraggedBlockId(null);
-    postVisualEdit({ type: "block-order", page, ids: next.map(item => item.id) });
+    postVisualEdit({ type: "block-order", page, ids: next.map(item => item.id), blocks: next });
   }
   function updateBlock(id: string, patch: Partial<PageBlock>) {
     blocksContext.setData(current => ({ ...current, [page]: (current[page] ?? []).map(block => block.id === id ? { ...block, ...patch } : block) }));
@@ -894,6 +980,53 @@ export function PageBlocks({ page }: { page: string }) {
   function beginElementAdjust(event: ReactPointerEvent<HTMLButtonElement>, block: PageBlock, slot: string, mode: "move" | "resize") {
     event.preventDefault();
     event.stopPropagation();
+    const floatingImage = block.type === "image" && Boolean(block.floating_position) && !block.parent_id && slot === "media";
+    if (floatingImage) {
+      const target = event.currentTarget.closest<HTMLElement>("[data-page-block-id]");
+      const canvas = target?.closest<HTMLElement>("main.page-layout-canvas");
+      if (!target || !canvas) return;
+      const canvasRect = canvas.getBoundingClientRect();
+      const targetRect = target.getBoundingClientRect();
+      const start = {
+        x: targetRect.left - canvasRect.left,
+        y: targetRect.top - canvasRect.top,
+        width: targetRect.width,
+        height: targetRect.height,
+      };
+      const startX = event.clientX;
+      const startY = event.clientY;
+      function onMove(pointer: PointerEvent) {
+        const dx = pointer.clientX - startX;
+        const dy = pointer.clientY - startY;
+        const next = mode === "move"
+          ? { ...start, x: start.x + dx, y: start.y + dy }
+          : { ...start, width: Math.max(40, start.width + dx), height: Math.max(40, start.height + dy) };
+        target!.style.left = `${next.x}px`;
+        target!.style.top = `${next.y}px`;
+        target!.style.width = `${next.width}px`;
+        target!.style.height = `${next.height}px`;
+      }
+      function onUp() {
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        const rect = target!.getBoundingClientRect();
+        const canvasNow = canvas!.getBoundingClientRect();
+        updateBlock(block.id, {
+          floating_position: {
+            x: Math.round(rect.left - canvasNow.left),
+            y: Math.round(rect.top - canvasNow.top),
+            width: Math.round(rect.width),
+            height: Math.round(rect.height),
+          },
+          // Older image edits saved a second, child-level slot rectangle.
+          // Floating images now use only their outer floating position.
+          element_layout: {},
+        });
+      }
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp, { once: true });
+      return;
+    }
     const canvas = event.currentTarget.closest(".page-builder-inner");
     if (!(canvas instanceof HTMLElement)) return;
     const canvasRect = canvas.getBoundingClientRect();
@@ -953,55 +1086,57 @@ export function PageBlocks({ page }: { page: string }) {
   }
   function renderNestedBlock(block: PageBlock) {
     const embedUrl = block.type === "video" ? embedVideoUrl(block.video_url ?? "") : "";
+    const uploadedVideo = block.type === "video" && isUploadedPageVideo(block.video_url ?? "");
     return <article key={block.id} data-page-block-id={block.id} className={`page-builder-nested-block page-builder-${block.type}`}>
       {block.type === "text" ? <p className="page-builder-nested-single-text" contentEditable={visualEdit} suppressContentEditableWarning onBlur={event => visualEdit && updateBlock(block.id, { body: event.currentTarget.innerText })}>{block.body || (visualEdit ? "Click to edit text" : "")}</p> : <>
       {block.type === "image" && block.image_url && <figure className={`page-builder-image-fit-${block.image_fit ?? "cover"}`}><img src={block.image_url} alt={block.image_alt ?? ""} style={{ objectFit: block.image_fit ?? "cover" }} />{(block.caption || visualEdit) && <figcaption contentEditable={visualEdit} suppressContentEditableWarning onBlur={event => visualEdit && updateBlock(block.id, { caption: event.currentTarget.innerText })}>{block.caption || "Click to add a caption"}</figcaption>}</figure>}
-      {block.type === "video" && embedUrl && <div className="page-builder-video"><iframe src={embedUrl} title={block.heading || "Mother Nature Academy video"} allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerPolicy="strict-origin-when-cross-origin" allowFullScreen /></div>}
+      {block.type === "video" && (embedUrl || uploadedVideo) && <div className={`page-builder-video${visualEdit ? " visual-video-editable" : ""}`}>{uploadedVideo ? <video src={block.video_url} controls /> : <iframe src={embedUrl} title={block.heading || "Mother Nature Academy video"} allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerPolicy="strict-origin-when-cross-origin" allowFullScreen />}</div>}
       {(block.heading || block.body || visualEdit) && <div className="page-builder-nested-copy"><h3 contentEditable={visualEdit} suppressContentEditableWarning onBlur={event => visualEdit && updateBlock(block.id, { heading: event.currentTarget.innerText })}>{block.heading || (visualEdit ? "Click to add a heading" : "")}</h3><p contentEditable={visualEdit} suppressContentEditableWarning onBlur={event => visualEdit && updateBlock(block.id, { body: event.currentTarget.innerText })}>{block.body || (visualEdit ? "Click to add text" : "")}</p></div>}
       </>}
-      {visualEdit && <div className="visual-nested-controls">{block.type === "image" && <><label>Image URL<input value={block.image_url ?? ""} onChange={event => updateBlock(block.id, { image_url: event.target.value })} /></label><label>Display style<select value={block.image_fit ?? "cover"} onChange={event => updateBlock(block.id, { image_fit: event.target.value as PageBlock["image_fit"] })}>{imageFitOptions.map(option => <option value={option.value} key={option.value}>{option.label}</option>)}</select></label></>}{block.type === "video" && <label>YouTube URL<input value={block.video_url ?? ""} onChange={event => updateBlock(block.id, { video_url: event.target.value })} /></label>}<button type="button" draggable onDragStart={() => setDraggedBlockId(block.id)} onDragEnd={() => setDraggedBlockId(null)} title="Drag this element onto another section to move it">⠿ Move to another section</button><button type="button" onClick={() => { if (window.confirm("Remove this element from the section? Save the page to publish the change.")) postVisualEdit({ type: "delete-block", page, blockId: block.id }); }}>Remove element</button></div>}
+      {visualEdit && <div className="visual-nested-controls">{block.type === "image" && <><label>Image URL<input value={block.image_url ?? ""} onChange={event => updateBlock(block.id, { image_url: event.target.value })} /></label><label>Display style<select value={block.image_fit ?? "cover"} onChange={event => updateBlock(block.id, { image_fit: event.target.value as PageBlock["image_fit"] })}>{imageFitOptions.map(option => <option value={option.value} key={option.value}>{option.label}</option>)}</select></label></>}<button type="button" draggable onDragStart={() => setDraggedBlockId(block.id)} onDragEnd={() => setDraggedBlockId(null)} title="Drag this element onto another section to move it">⠿ Move to another section</button><button type="button" onClick={() => { if (window.confirm("Remove this element from the section? Save the page to publish the change.")) postVisualEdit({ type: "delete-block", page, blockId: block.id }); }}>Remove element</button></div>}
     </article>;
   }
   return <div className="page-builder-sections">{blocks.filter(block => !block.parent_id).map(block => {
     const background = /^#[0-9a-fA-F]{6}$/.test(block.background) ? block.background : "#fffefa";
     const embedUrl = block.type === "video" ? embedVideoUrl(block.video_url ?? "") : "";
+    const uploadedVideo = block.type === "video" && isUploadedPageVideo(block.video_url ?? "");
     const layout = block.layout ?? (block.type === "image" || block.type === "video" ? "image-left" : block.type === "callout" ? "centered" : "standard");
+    const floating = Boolean(block.floating_position && !block.parent_id);
+    const floatingText = floating && block.type === "text";
+    const floatingImage = floating && block.type === "image";
+    const floatingVideo = floating && block.type === "video";
     const slots = [
       ...(block.type === "image" && block.image_url ? ["media"] : []),
       ...(block.type === "video" && embedUrl ? ["media"] : []),
       ...(["text", "image", "video", "callout"].includes(block.type) ? ["copy"] : []),
     ];
-    const positioned = Boolean(block.element_layout && Object.keys(block.element_layout).length);
+    const positioned = !floatingImage && Boolean(block.element_layout && Object.keys(block.element_layout).length);
     const slotStyle = (slot: string) => {
+      if (floatingImage) return undefined;
       const item = block.element_layout?.[slot];
       return item ? { position: "absolute" as const, left: item.unit === "free" ? `${item.x}px` : `${item.x}%`, top: item.unit === "free" ? `${item.y}px` : `${item.y}%`, width: item.unit === "free" ? `${item.width}px` : `${item.width}%`, height: item.unit === "free" ? `${item.height}px` : `${item.height}%`, zIndex: 2 } : undefined;
     };
     const tools = (slot: string) => visualEdit && <div className="visual-element-tools" contentEditable={false}><button type="button" title="Drag to move this element" aria-label="Move element" onPointerDown={event => beginElementAdjust(event, block, slot, "move")}>⠿</button><button type="button" className="visual-element-resize" title="Drag to resize this element" aria-label="Resize element" onPointerDown={event => beginElementAdjust(event, block, slot, "resize")}>↘</button></div>;
-    const floating = Boolean(block.floating_position && !block.parent_id);
-    const floatingText = floating && block.type === "text";
-    const floatingImage = floating && block.type === "image";
-    const floatingVideo = floating && block.type === "video";
     const hasCalloutCopy = Boolean(block.heading || block.body || block.button_label);
     const emptyCallout = block.type === "callout" && !hasCalloutCopy && !blocks.some(child => child.parent_id === block.id);
     const float = block.floating_position;
-    return <section data-page-block-id={block.id} className={`page-builder-block page-builder-${block.type} page-builder-layout-${layout}${positioned ? " page-builder-custom-layout" : ""}${emptyCallout ? " page-builder-empty-callout" : ""}${floating ? " page-builder-floating-element" : ""}${floatingText ? " page-builder-floating-text" : ""}${floatingImage ? " page-builder-floating-image" : ""}${floatingVideo ? " page-builder-floating-video" : ""}${visualEdit && floatingVideo ? " visual-video-editable" : ""}${draggedBlockId === block.id ? " visual-block-dragging" : ""}`} key={block.id} style={{ backgroundColor: background, color: readableTextColor(background), ...(floating && float ? { left: float.x, top: float.y, width: float.width, ...(!floatingText ? { height: float.height } : { minHeight: float.height }) } : {}) }} onDragOver={event => visualEdit && event.preventDefault()} onDrop={event => {
+    return <section data-page-block-id={block.id} className={`page-builder-block page-builder-${block.type} page-builder-layout-${layout}${positioned ? " page-builder-custom-layout" : ""}${emptyCallout ? " page-builder-empty-callout" : ""}${floating ? " page-builder-floating-element" : ""}${floatingText ? " page-builder-floating-text" : ""}${floatingImage ? " page-builder-floating-image" : ""}${floatingVideo ? " page-builder-floating-video" : ""}${visualEdit && block.type === "video" ? " visual-video-editable" : ""}${draggedBlockId === block.id ? " visual-block-dragging" : ""}`} key={block.id} style={{ backgroundColor: background, color: readableTextColor(background), ...(floating && float ? { left: float.x, top: float.y, width: float.width, ...(!floatingText ? { height: float.height } : { minHeight: float.height }) } : {}) }} onDragOver={event => visualEdit && event.preventDefault()} onDrop={event => {
       if (visualEdit && floatingImage && event.dataTransfer.files.length) {
         event.preventDefault(); event.stopPropagation(); void uploadPageImage(block.id, event.dataTransfer.files[0]); return;
       }
       if (visualEdit) reorderBlocks(event, block.id);
     }}>
       <div className={`container page-builder-inner${positioned ? " page-builder-positioned" : ""}`}>
-        {floatingText ? <p className="page-builder-single-text" contentEditable={visualEdit} suppressContentEditableWarning onBlur={event => visualEdit && updateBlock(block.id, { body: event.currentTarget.innerText })} data-visual-label="Text">{block.body || (visualEdit ? "Click to edit text" : "")}</p> : floatingImage ? block.image_url ? <figure className={`page-builder-image-only page-builder-image-fit-${block.image_fit ?? "cover"}`} data-layout-slot="media" style={slotStyle("media")}><img src={block.image_url} alt={block.image_alt ?? ""} style={pageImageStyle(block)} />{block.caption && <figcaption contentEditable={visualEdit} suppressContentEditableWarning onBlur={event => visualEdit && updateBlock(block.id, { caption: event.currentTarget.innerText })} data-visual-label="image caption">{block.caption}</figcaption>}{tools("media")}</figure> : visualEdit && <div className="page-builder-media-placeholder page-builder-image-placeholder" data-layout-slot="media">Select this image, then add a URL or upload a file in its settings</div> : floatingVideo ? embedUrl ? <div className="page-builder-video page-builder-video-only" data-layout-slot="media" style={slotStyle("media")}><iframe src={embedUrl} title="Mother Nature Academy video" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerPolicy="strict-origin-when-cross-origin" allowFullScreen />{tools("media")}</div> : visualEdit && <div className="page-builder-media-placeholder page-builder-video-placeholder" data-layout-slot="media">Add a YouTube URL in the video controls</div> : <>
+        {floatingText ? <p className="page-builder-single-text" contentEditable={visualEdit} suppressContentEditableWarning onBlur={event => visualEdit && updateBlock(block.id, { body: event.currentTarget.innerText })} data-visual-label="Text">{block.body || (visualEdit ? "Click to edit text" : "")}</p> : floatingImage ? block.image_url ? <figure className={`page-builder-image-only page-builder-image-fit-${block.image_fit ?? "cover"}`} data-layout-slot="media" style={slotStyle("media")}><img src={block.image_url} alt={block.image_alt ?? ""} style={pageImageStyle(block)} />{block.caption && <figcaption contentEditable={visualEdit} suppressContentEditableWarning onBlur={event => visualEdit && updateBlock(block.id, { caption: event.currentTarget.innerText })} data-visual-label="image caption">{block.caption}</figcaption>}{tools("media")}</figure> : visualEdit && <div className="page-builder-media-placeholder page-builder-image-placeholder" data-layout-slot="media">Select this image, then add a URL or upload a file in its settings</div> : floatingVideo ? (embedUrl || uploadedVideo) ? <div className="page-builder-video page-builder-video-only" data-layout-slot="media" style={slotStyle("media")}>{uploadedVideo ? <video src={block.video_url} controls /> : <iframe src={embedUrl} title="Mother Nature Academy video" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerPolicy="strict-origin-when-cross-origin" allowFullScreen />}{tools("media")}</div> : visualEdit && <div className="page-builder-media-placeholder page-builder-video-placeholder" data-layout-slot="media">Add a video source in the selected element settings</div> : <>
         {block.type === "image" && block.image_url && <figure className={`page-builder-image-fit-${block.image_fit ?? "cover"}`} data-layout-slot="media" style={slotStyle("media")}><img src={block.image_url} alt={block.image_alt ?? ""} style={{ objectFit: block.image_fit ?? "cover" }} />{(block.caption || visualEdit) && <figcaption contentEditable={visualEdit} suppressContentEditableWarning onBlur={event => visualEdit && updateBlock(block.id, { caption: event.currentTarget.innerText })} data-visual-label="image caption">{block.caption || (visualEdit ? "Click to add a caption" : "")}</figcaption>}{tools("media")}</figure>}
         {visualEdit && !block.image_url && block.type === "image" && <div className="page-builder-media-placeholder" data-layout-slot="media">Select this image, then add a URL or upload a file in its settings</div>}
-        {block.type === "video" && embedUrl && <div className="page-builder-video" data-layout-slot="media" style={slotStyle("media")}><iframe src={embedUrl} title={block.heading || "Mother Nature Academy video"} allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerPolicy="strict-origin-when-cross-origin" allowFullScreen />{tools("media")}</div>}
-        {visualEdit && !embedUrl && block.type === "video" && <div className="page-builder-media-placeholder" data-layout-slot="media">Add a YouTube URL in the controls</div>}
+        {block.type === "video" && (embedUrl || uploadedVideo) && <div className="page-builder-video" data-layout-slot="media" style={slotStyle("media")}>{uploadedVideo ? <video src={block.video_url} controls /> : <iframe src={embedUrl} title={block.heading || "Mother Nature Academy video"} allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerPolicy="strict-origin-when-cross-origin" allowFullScreen />}{tools("media")}</div>}
+        {visualEdit && !embedUrl && !uploadedVideo && block.type === "video" && <div className="page-builder-media-placeholder" data-layout-slot="media">Add a video source in the selected element settings</div>}
         {(block.type !== "callout" || hasCalloutCopy) && <div className="page-builder-copy" data-layout-slot="copy" style={slotStyle("copy")}><h2 contentEditable={visualEdit} suppressContentEditableWarning onBlur={event => visualEdit && updateBlock(block.id, { heading: event.currentTarget.innerText })} data-visual-label="section heading">{block.heading || (block.type !== "callout" && visualEdit ? "Click to add a heading" : "")}</h2><p contentEditable={visualEdit} suppressContentEditableWarning onBlur={event => visualEdit && updateBlock(block.id, { body: event.currentTarget.innerText })} data-visual-label="section text">{block.body || (block.type !== "callout" && visualEdit ? "Click to add section text" : "")}</p>{block.type === "callout" && block.button_label && block.button_url && <a className="button" href={block.button_url}>{block.button_label} <span>↗</span></a>}{tools("copy")}</div>}
         </>}
       </div>
       {block.type === "callout" && blocks.some(child => child.parent_id === block.id) && <div className="page-builder-nested-elements">{blocks.filter(child => child.parent_id === block.id).map(renderNestedBlock)}</div>}
-      {visualEdit && floatingVideo && <div className="visual-block-controls visual-video-only-controls" contentEditable={false}><label>YouTube URL<input value={block.video_url ?? ""} onChange={event => updateBlock(block.id, { video_url: event.target.value })} /></label></div>}
-      {visualEdit && !floatingText && !floatingImage && !floatingVideo && <div className="visual-block-controls" contentEditable={false}><label title="Change section background">Background<input type="color" value={background} onChange={event => { const color = event.target.value; const section = event.currentTarget.closest(".page-builder-block"); if (section instanceof HTMLElement) { section.style.backgroundColor = color; section.style.color = readableTextColor(color); } updateBlock(block.id, { background: color }); }} /></label>{block.type === "image" && <><label>Image URL<input value={block.image_url ?? ""} onChange={event => updateBlock(block.id, { image_url: event.target.value })} /></label><label>Alt text<input value={block.image_alt ?? ""} onChange={event => updateBlock(block.id, { image_alt: event.target.value })} /></label><label>Display style<select value={block.image_fit ?? "cover"} onChange={event => updateBlock(block.id, { image_fit: event.target.value as PageBlock["image_fit"] })}>{imageFitOptions.map(option => <option value={option.value} key={option.value}>{option.label}</option>)}</select></label></>}{block.type === "video" && <label>YouTube URL<input value={block.video_url ?? ""} onChange={event => updateBlock(block.id, { video_url: event.target.value })} /></label>}<button type="button" draggable onDragStart={() => setDraggedBlockId(block.id)} onDragEnd={() => setDraggedBlockId(null)} title="Drag this handle onto another section to reorder">⠿ Drag section</button><button type="button" onClick={() => { if (window.confirm("Delete this section from the page? Save the page to publish this change.")) postVisualEdit({ type: "delete-block", page, blockId: block.id }); }}>{block.type === "callout" ? "Delete section" : "Remove section"}</button><span>Use ⠿ and ↘ handles to move or resize content.</span></div>}
+      {visualEdit && !floatingText && !floatingImage && !floatingVideo && <div className="visual-block-controls" contentEditable={false}><label title="Change section background">Background<input type="color" value={background} onChange={event => { const color = event.target.value; const section = event.currentTarget.closest(".page-builder-block"); if (section instanceof HTMLElement) { section.style.backgroundColor = color; section.style.color = readableTextColor(color); } updateBlock(block.id, { background: color }); }} /></label>{block.type === "image" && <><label>Image URL<input value={block.image_url ?? ""} onChange={event => updateBlock(block.id, { image_url: event.target.value })} /></label><label>Alt text<input value={block.image_alt ?? ""} onChange={event => updateBlock(block.id, { image_alt: event.target.value })} /></label><label>Display style<select value={block.image_fit ?? "cover"} onChange={event => updateBlock(block.id, { image_fit: event.target.value as PageBlock["image_fit"] })}>{imageFitOptions.map(option => <option value={option.value} key={option.value}>{option.label}</option>)}</select></label></>}<button type="button" draggable onDragStart={() => setDraggedBlockId(block.id)} onDragEnd={() => setDraggedBlockId(null)} title="Drag this handle onto another section to reorder">⠿ Drag section</button><button type="button" onClick={() => { if (window.confirm("Delete this section from the page? Save the page to publish this change.")) postVisualEdit({ type: "delete-block", page, blockId: block.id }); }}>{block.type === "callout" ? "Delete section" : "Remove section"}</button><span>Use ⠿ and ↘ handles to move or resize content.</span></div>}
     </section>;
   })}</div>;
 }

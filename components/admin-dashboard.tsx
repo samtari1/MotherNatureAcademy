@@ -294,7 +294,12 @@ export function AdminDashboard() {
       if (message.type === "block-order" && Array.isArray(message.ids)) {
         setPageBlocks(current => {
           const currentBlocks = current[page] ?? [];
-          const blocks = (message.ids as string[]).map(id => currentBlocks.find(block => block.id === id)).filter((block): block is PageBlock => Boolean(block));
+          const reorderedBlocks = Array.isArray(message.blocks) ? message.blocks as PageBlock[] : [];
+          const blocks = (message.ids as string[]).map(id => {
+            const currentBlock = currentBlocks.find(block => block.id === id);
+            const reorderedBlock = reorderedBlocks.find(block => block.id === id);
+            return currentBlock && reorderedBlock ? { ...currentBlock, ...reorderedBlock } : currentBlock;
+          }).filter((block): block is PageBlock => Boolean(block));
           visualFrameRef.current?.contentWindow?.postMessage({ source: "mna-admin", type: "replace-page-blocks", page, blocks }, window.location.origin);
           return { ...current, [page]: blocks };
         });
