@@ -93,7 +93,7 @@ function PageBlockEditor({ blocks, onChange }: { blocks: PageBlock[]; onChange: 
 async function request(path: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers);
   if (!(init.body instanceof FormData) && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-  const response = await fetch(apiUrl(path), { ...init, credentials: "include", headers });
+  const response = await fetch(apiUrl(path), { ...init, cache: init.cache ?? "no-store", credentials: "include", headers });
   const result = await response.json().catch(() => ({}));
   if (!response.ok) {
     const detail = Array.isArray(result.detail)
@@ -308,16 +308,12 @@ export function AdminDashboard() {
       }
       if (message.type === "add-block" && ["text", "image", "video", "callout"].includes(message.blockType)) {
         const type = message.blockType as PageBlockType;
-        setPageBlocks(current => {
-          const requestedPosition = message.floatingPosition;
-          const floating_position = type !== "callout" && requestedPosition && typeof requestedPosition === "object"
-            ? Object.fromEntries(["x", "y", "width", "height"].map(key => [key, Number((requestedPosition as Record<string, unknown>)[key])])) as { x: number; y: number; width: number; height: number }
-            : undefined;
-          const block: PageBlock = { id: crypto.randomUUID(), type, heading: "", body: "", background: "#fffefa", ...(floating_position ? { floating_position } : {}), layout: type === "image" || type === "video" ? "image-left" : type === "callout" ? "centered" : "standard" };
-          const blocks = [...(current[page] ?? []), block];
-          visualFrameRef.current?.contentWindow?.postMessage({ source: "mna-admin", type: "replace-page-blocks", page, blocks }, window.location.origin);
-          return { ...current, [page]: blocks };
-        });
+        const requestedPosition = message.floatingPosition;
+        const floating_position = type !== "callout" && requestedPosition && typeof requestedPosition === "object"
+          ? Object.fromEntries(["x", "y", "width", "height"].map(key => [key, Number((requestedPosition as Record<string, unknown>)[key])])) as { x: number; y: number; width: number; height: number }
+          : undefined;
+        const block: PageBlock = { id: typeof message.blockId === "string" ? message.blockId : crypto.randomUUID(), type, heading: "", body: "", background: "#fffefa", ...(floating_position ? { floating_position } : {}), layout: type === "image" || type === "video" ? "image-left" : type === "callout" ? "centered" : "standard" };
+        setPageBlocks(current => ({ ...current, [page]: [...(current[page] ?? []), block] }));
       }
     }
     window.addEventListener("message", receiveVisualEdit);
@@ -445,8 +441,9 @@ export function AdminDashboard() {
     try {
       const emptyImage = (pageBlocks[selectedPageSlug] ?? []).find(block => block.type === "image" && !block.image_url?.trim());
       if (emptyImage) throw new Error("An image element on this page has no image yet. Select it in the preview and add an image URL or upload a file, or delete the empty image element.");
-      const saved = await request(`/api/admin/page-content/${selectedPageSlug}`, { method: "PUT", body: JSON.stringify({ content: { ...pageCopies[selectedPageSlug], blocks: pageBlocks[selectedPageSlug] ?? [], element_layouts: pageLayouts[selectedPageSlug] ?? {}, visual_elements: pageVisualElements[selectedPageSlug] ?? {} } }) }) as { content: { blocks?: PageBlock[] } };
+      const saved = await request(`/api/admin/page-content/${selectedPageSlug}`, { method: "PUT", body: JSON.stringify({ content: { ...pageCopies[selectedPageSlug], blocks: pageBlocks[selectedPageSlug] ?? [], element_layouts: pageLayouts[selectedPageSlug] ?? {}, visual_elements: pageVisualElements[selectedPageSlug] ?? {} } }) }) as { content: { blocks?: PageBlock[]; visual_elements?: Record<string, VisualElementStyle> } };
       setPageBlocks(current => ({ ...current, [selectedPageSlug]: saved.content.blocks ?? [] }));
+      setPageVisualElements(current => ({ ...current, [selectedPageSlug]: saved.content.visual_elements ?? {} }));
       setNotice(`${editablePages.find(page => page.slug === selectedPageSlug)?.label ?? "Page"} content saved and published.`);
       setPageSaveToast(true);
       if (pageSaveToastTimerRef.current !== null) window.clearTimeout(pageSaveToastTimerRef.current);

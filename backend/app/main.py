@@ -1300,7 +1300,8 @@ def get_public_site_content():
 
 
 @app.get("/api/page-content")
-def get_public_page_content():
+def get_public_page_content(response: Response):
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     with SessionLocal() as db:
         rows = db.scalars(select(PageContent)).all()
         return {row.page_slug: json.loads(row.content_json) for row in rows}

@@ -64,7 +64,7 @@ export const defaultPageCopy: PageCopyMap = {
 
 const PageCopyContext = createContext<PageCopyMap>(defaultPageCopy);
 const PageLayoutContext = createContext<{ data: Record<string, Record<string, CopyElementLayout>>; setData: Dispatch<SetStateAction<Record<string, Record<string, CopyElementLayout>>>> }>({ data: {}, setData: () => {} });
-const PageBlocksContext = createContext<{ data: Record<string, PageBlock[]>; setData: Dispatch<SetStateAction<Record<string, PageBlock[]>>> }>({ data: {}, setData: () => {} });
+const PageBlocksContext = createContext<{ data: Record<string, PageBlock[]>; setData: Dispatch<SetStateAction<Record<string, PageBlock[]>>>; appendBlock: (page: string, block: PageBlock) => void }>({ data: {}, setData: () => {}, appendBlock: () => {} });
 const VisualEditContext = createContext(false);
 
 function visualPageSlug() {
@@ -77,7 +77,10 @@ function findVisualCallout(element: HTMLElement) {
 }
 
 function findVisualSection(element: HTMLElement) {
-  return findVisualCallout(element) ?? element.closest<HTMLElement>("section");
+  // A section can contain callout/CTA descendants. The section-level delete
+  // action must resolve to the section itself, otherwise it only hides that
+  // inner card and leaves the surrounding section in place.
+  return element.closest<HTMLElement>("section") ?? findVisualCallout(element);
 }
 
 function preserveElementFlowSpace(element: HTMLElement) {
@@ -104,7 +107,7 @@ function applyFreeCopyLayout(element: HTMLElement, canvas: HTMLElement, layout: 
   element.style.minHeight = `${layout.height}px`;
 }
 
-function visualElementKey(element: HTMLElement, root: HTMLElement) {
+function legacyVisualElementKey(element: HTMLElement, root: HTMLElement) {
   const blockId = element.closest<HTMLElement>("[data-page-block-id]")?.dataset.pageBlockId;
   if (blockId && element === element.closest<HTMLElement>("[data-page-block-id]")) return `block:${blockId}`;
   if (element.tagName === "SECTION" && element.parentElement === root) {
@@ -122,6 +125,23 @@ function visualElementKey(element: HTMLElement, root: HTMLElement) {
     current = current.parentElement;
   }
   return parts.join("/").slice(0, 500);
+}
+
+function visualElementKey(element: HTMLElement, root: HTMLElement) {
+  const blockId = element.closest<HTMLElement>("[data-page-block-id]")?.dataset.pageBlockId;
+  if (blockId && element === element.closest<HTMLElement>("[data-page-block-id]")) return `block:${blockId}`;
+  if (element.tagName === "SECTION") {
+    const signature = (section: HTMLElement) => Array.from(section.classList)
+      .filter(className => className !== "visual-element-selected")
+      .sort()
+      .join(".") || "untitled";
+    const classes = signature(element);
+    const peers = Array.from(root.querySelectorAll<HTMLElement>("section"))
+      .filter(section => signature(section) === classes);
+    if (peers.length <= 1) return `section:${classes}`;
+    return `section:${classes}:${peers.indexOf(element) + 1}`;
+  }
+  return legacyVisualElementKey(element, root);
 }
 
 function visualElementLabel(element: HTMLElement) {
@@ -205,18 +225,50 @@ export function PageCopyProvider({ children }: { children: ReactNode }) {
   const [layouts, setLayouts] = useState<Record<string, Record<string, CopyElementLayout>>>({});
   const [visualElements, setVisualElements] = useState<Record<string, Record<string, VisualElementStyle>>>({});
   const [blocks, setBlocks] = useState<Record<string, PageBlock[]>>({});
+  const locallyChangedBlockPages = useRef(new Set<string>());
   const [visualEdit, setVisualEdit] = useState(false);
+  function appendBlock(page: string, block: PageBlock) {
+    locallyChangedBlockPages.current.add(page);
+    const root = document.querySelector<HTMLElement>("main.page-layout-canvas");
+    const sections = root?.querySelector<HTMLElement>(".page-builder-sections");
+    if (root && sections) {
+      const key = visualElementKey(sections, root);
+      if (sections.style.display === "none" || visualElements[page]?.[key]?.hidden) {
+        sections.style.display = "";
+        setVisualElements(current => ({ ...current, [page]: { ...current[page], [key]: { ...current[page]?.[key], hidden: false } } }));
+        postVisualEdit({ type: "visual-element-change", page, key, patch: { hidden: false } });
+      }
+    }
+    setBlocks(current => ({ ...current, [page]: [...(current[page] ?? []), block] }));
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const added = document.querySelector<HTMLElement>(`main.page-layout-canvas [data-page-block-id="${CSS.escape(block.id)}"]`);
+      added?.scrollIntoView({ behavior: "smooth", block: "center" });
+      if (block.type === "text") {
+        const editable = added?.querySelector<HTMLElement>("[contenteditable='true']");
+        if (editable) {
+          editable.focus({ preventScroll: true });
+          const range = document.createRange();
+          range.selectNodeContents(editable);
+          const selection = window.getSelection();
+          selection?.removeAllRanges();
+          selection?.addRange(range);
+        }
+      } else if (block.type === "callout") added?.click();
+    }));
+  }
   useEffect(() => {
     const requested = new URLSearchParams(window.location.search).get("visualEdit") === "1";
     if (requested) fetch("/api/admin/session", { credentials: "include" }).then(response => setVisualEdit(response.ok)).catch(() => {});
-    fetch("/api/page-content").then(response => response.ok ? response.json() : null).then((saved: Record<string, Record<string, unknown>> | null) => {
+    fetch("/api/page-content", { cache: "no-store" }).then(response => response.ok ? response.json() : null).then((saved: Record<string, Record<string, unknown>> | null) => {
       if (!saved) return;
       setCopy(current => Object.fromEntries(Object.entries(current).map(([page, fields]) => {
         const savedFields = saved[page] ?? {};
         const textFields = Object.fromEntries(Object.entries(savedFields).filter(([, value]) => typeof value === "string")) as Record<string, string>;
         return [page, { ...fields, ...textFields }];
       })));
-      setBlocks(Object.fromEntries(Object.entries(saved).map(([page, fields]) => [page, Array.isArray(fields.blocks) ? fields.blocks as PageBlock[] : []])));
+      setBlocks(current => Object.fromEntries(Object.entries(saved).map(([page, fields]) => [page, locallyChangedBlockPages.current.has(page)
+        ? current[page] ?? []
+        : Array.isArray(fields.blocks) ? fields.blocks as PageBlock[] : []])));
       setLayouts(Object.fromEntries(Object.entries(saved).map(([page, fields]) => [page, fields.element_layouts && typeof fields.element_layouts === "object" ? fields.element_layouts as Record<string, CopyElementLayout> : {}])));
       setVisualElements(Object.fromEntries(Object.entries(saved).map(([page, fields]) => [page, fields.visual_elements && typeof fields.visual_elements === "object" ? fields.visual_elements as Record<string, VisualElementStyle> : {}])));
     }).catch(() => {});
@@ -231,7 +283,10 @@ export function PageCopyProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     function receive(event: MessageEvent) {
       if (event.origin !== window.location.origin || event.source !== window.parent || event.data?.source !== "mna-admin") return;
-      if (event.data.type === "replace-page-blocks" && Array.isArray(event.data.blocks)) setBlocks(current => ({ ...current, [event.data.page]: event.data.blocks }));
+      if (event.data.type === "replace-page-blocks" && Array.isArray(event.data.blocks)) {
+        locallyChangedBlockPages.current.add(event.data.page);
+        setBlocks(current => ({ ...current, [event.data.page]: event.data.blocks }));
+      }
       if (event.data.type === "replace-page-copy" && event.data.copy && typeof event.data.copy === "object") setCopy(current => ({ ...current, [event.data.page]: { ...current[event.data.page], ...event.data.copy } }));
       if (event.data.type === "replace-page-layouts" && event.data.layouts && typeof event.data.layouts === "object") setLayouts(current => ({ ...current, [event.data.page]: event.data.layouts }));
       if (event.data.type === "replace-visual-elements" && event.data.elements && typeof event.data.elements === "object") setVisualElements(current => ({ ...current, [event.data.page]: event.data.elements }));
@@ -253,15 +308,33 @@ export function PageCopyProvider({ children }: { children: ReactNode }) {
       // which competes with the slot layout and makes the selection frame
       // drift away from the rendered image.
       if (isPageBlockMediaImage(element)) return;
-      const values = visualElements[page]?.[visualElementKey(element, root)];
-      if (values) applyVisualElementStyle(element, values);
+      const key = visualElementKey(element, root);
+      let values = visualElements[page]?.[key];
+      // Older saves included the editor's transient selection class in a
+      // top-level section key. Keep honoring those keys while new saves use
+      // the stable key without editor state.
+      if (!values && element.tagName === "SECTION") {
+        const legacyKey = legacyVisualElementKey(element, root);
+        const oldClasses = [...new Set([...Array.from(element.classList), "visual-element-selected"])].sort().join(".") || "untitled";
+        values = visualElements[page]?.[legacyKey] ?? visualElements[page]?.[`section:${oldClasses}`];
+      }
+      if (values) applyVisualElementStyle(element, element.classList.contains("page-builder-sections") ? { ...values, hidden: false } : values);
     });
+    const sections = root.querySelector<HTMLElement>(".page-builder-sections");
+    if (sections) {
+      const key = visualElementKey(sections, root);
+      if (visualElements[page]?.[key]?.hidden) {
+        sections.style.display = "";
+        setVisualElements(current => ({ ...current, [page]: { ...current[page], [key]: { ...current[page]?.[key], hidden: false } } }));
+        postVisualEdit({ type: "visual-element-change", page, key, patch: { hidden: false } });
+      }
+    }
     applySaved();
     const observer = new MutationObserver(applySaved);
     observer.observe(root, { childList: true, subtree: true });
     return () => observer.disconnect();
   }, [visualElements]);
-  return <PageCopyContext.Provider value={copy}><PageLayoutContext.Provider value={{ data: layouts, setData: setLayouts }}><PageBlocksContext.Provider value={{ data: blocks, setData: setBlocks }}><VisualEditContext.Provider value={visualEdit}>{children}{visualEdit && <><VisualEditToolbar /><VisualElementInspector valueMap={visualElements} setValueMap={setVisualElements} /></>}</VisualEditContext.Provider></PageBlocksContext.Provider></PageLayoutContext.Provider></PageCopyContext.Provider>;
+  return <PageCopyContext.Provider value={copy}><PageLayoutContext.Provider value={{ data: layouts, setData: setLayouts }}><PageBlocksContext.Provider value={{ data: blocks, setData: setBlocks, appendBlock }}><VisualEditContext.Provider value={visualEdit}>{children}{visualEdit && <><VisualEditToolbar /><VisualElementInspector valueMap={visualElements} setValueMap={setVisualElements} /></>}</VisualEditContext.Provider></PageBlocksContext.Provider></PageLayoutContext.Provider></PageCopyContext.Provider>;
 }
 
 function colorInputValue(value: string) {
@@ -305,6 +378,10 @@ function VisualElementInspector({ valueMap, setValueMap }: { valueMap: Record<st
       const callout = findVisualCallout(target);
       const specificElement = target.closest<HTMLElement>("img") ?? target.closest<HTMLElement>("button") ?? target.closest<HTMLElement>("a");
       const element = specificElement ?? callout ?? target.closest<HTMLElement>("main.page-layout-canvas *");
+      if (element?.classList.contains("page-builder-sections")) {
+        clearSelection();
+        return;
+      }
       if (!element || element === activeRoot || ["SCRIPT", "STYLE", "SVG", "PATH", "IFRAME"].includes(element.tagName)) {
         clearSelection();
         return;
@@ -564,15 +641,16 @@ function VisualElementInspector({ valueMap, setValueMap }: { valueMap: Record<st
   const isCallout = Boolean(calloutTarget);
   function deleteCallout() {
     if (!calloutTarget || !window.confirm("Delete this section from the page? Save the page to publish this change.")) return;
-    const blockId = calloutTarget.closest<HTMLElement>("[data-page-block-id]")?.dataset.pageBlockId;
+    const target = sectionTarget ?? calloutTarget;
+    const blockId = target.closest<HTMLElement>("[data-page-block-id]")?.dataset.pageBlockId;
     if (blockId) {
       postVisualEdit({ type: "delete-block", page: pageRef.current, blockId });
     } else {
       const root = document.querySelector<HTMLElement>("main.page-layout-canvas");
       if (!root) return;
-      const key = visualElementKey(calloutTarget, root);
-      calloutTarget.dataset.visualKey = key;
-      applyVisualElementStyle(calloutTarget, { hidden: true });
+      const key = visualElementKey(target, root);
+      target.dataset.visualKey = key;
+      applyVisualElementStyle(target, { hidden: true });
       setValueMap(current => ({ ...current, [pageRef.current]: { ...current[pageRef.current], [key]: { ...current[pageRef.current]?.[key], hidden: true } } }));
       postVisualEdit({ type: "visual-element-change", page: pageRef.current, key, patch: { hidden: true } });
     }
@@ -697,7 +775,25 @@ function VisualCopyElement({ page, field, children, className }: { page: string;
 
 function VisualEditToolbar() {
   const [open, setOpen] = useState(false);
-  return <aside className="visual-edit-toolbar"><button type="button" className="visual-add-toggle" aria-label="Add content" aria-expanded={open} onClick={() => setOpen(value => !value)}>＋</button>{open && <div className="visual-add-menu"><strong>Add to page</strong><span>New text, image, and video items start in the center. Drag them into place when ready.</span>{(["text", "image", "video", "callout"] as PageBlockType[]).map(type => <button type="button" key={type} onClick={() => { const canvas = document.querySelector<HTMLElement>("main.page-layout-canvas"); const bounds = canvas?.getBoundingClientRect(); const size = type === "video" ? { width: 420, height: 250 } : type === "image" ? { width: 360, height: 230 } : type === "text" ? { width: 340, height: 64 } : { width: 340, height: 170 }; const position = type !== "callout" && bounds ? { x: Math.max(12, (bounds.width - size.width) / 2), y: Math.max(12, window.scrollY + (window.innerHeight - size.height) / 2 - bounds.top), ...size } : undefined; postVisualEdit({ type: "add-block", page: new URLSearchParams(window.location.search).get("page") || window.location.pathname.split("/").filter(Boolean).pop() || "home", blockType: type, ...(position ? { floatingPosition: position } : {}) }); setOpen(false); }}>{type === "callout" ? "＋ Section" : `＋ ${type[0].toUpperCase()}${type.slice(1)}`}</button>)}</div>}</aside>;
+  const pageBlocks = useContext(PageBlocksContext);
+  return <aside className="visual-edit-toolbar">
+    <button type="button" className="visual-add-toggle" aria-label="Add content" aria-expanded={open} onClick={() => setOpen(value => !value)}>＋</button>
+    {open && <div className="visual-add-menu">
+      <strong>Add to page</strong>
+      <span>New text, image, and video items start in the center. Drag them into place when ready.</span>
+      {(["text", "image", "video", "callout"] as PageBlockType[]).map(type => <button type="button" key={type} onClick={() => {
+        const canvas = document.querySelector<HTMLElement>("main.page-layout-canvas");
+        const bounds = canvas?.getBoundingClientRect();
+        const size = type === "video" ? { width: 420, height: 250 } : type === "image" ? { width: 360, height: 230 } : type === "text" ? { width: 340, height: 64 } : { width: 340, height: 170 };
+        const position = type !== "callout" && bounds ? { x: Math.max(12, (bounds.width - size.width) / 2), y: Math.max(12, window.scrollY + (window.innerHeight - size.height) / 2 - bounds.top), ...size } : undefined;
+        const page = new URLSearchParams(window.location.search).get("page") || window.location.pathname.split("/").filter(Boolean).pop() || "home";
+        const block: PageBlock = { id: crypto.randomUUID(), type, heading: "", body: "", background: "#fffefa", ...(position ? { floating_position: position } : {}), layout: type === "image" || type === "video" ? "image-left" : type === "callout" ? "centered" : "standard" };
+        pageBlocks.appendBlock(page, block);
+        postVisualEdit({ type: "add-block", page, blockId: block.id, blockType: type, ...(position ? { floatingPosition: position } : {}) });
+        setOpen(false);
+      }}>{type === "callout" ? "＋ Section" : `＋ ${type[0].toUpperCase()}${type.slice(1)}`}</button>)}
+    </div>}
+  </aside>;
 }
 
 export function PageCopy({ page, field, fallback, className }: { page: string; field: string; fallback?: string; className?: string }) {
